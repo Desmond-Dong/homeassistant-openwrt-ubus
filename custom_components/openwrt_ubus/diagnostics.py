@@ -13,8 +13,13 @@ from .const import (
     CONF_CERT_PATH,
     CONF_USE_HTTPS,
     CONF_VERIFY_SSL,
+    CONF_PORT,
+    CONF_ENDPOINT,
     DEFAULT_USE_HTTPS,
     DEFAULT_VERIFY_SSL,
+    DEFAULT_HTTP_PORT,
+    DEFAULT_HTTPS_PORT,
+    DEFAULT_ENDPOINT,
     build_ubus_url,
 )
 
@@ -38,6 +43,8 @@ class ConnectionDiagnostics:
         use_https: bool = DEFAULT_USE_HTTPS,
         verify_ssl: bool = DEFAULT_VERIFY_SSL,
         cert_path: str | None = None,
+        port: int | None = None,
+        endpoint: str = DEFAULT_ENDPOINT,
     ) -> dict[str, Any]:
         """Test connection to OpenWrt device and return diagnostic information.
 
@@ -49,6 +56,8 @@ class ConnectionDiagnostics:
             use_https: Whether to use HTTPS
             verify_ssl: Whether to verify SSL certificates
             cert_path: Path to custom certificate file
+            port: Optional custom OpenWrt ubus port
+            endpoint: Optional custom OpenWrt ubus endpoint
 
         Returns:
             Dictionary containing diagnostic information
@@ -66,7 +75,9 @@ class ConnectionDiagnostics:
 
         try:
             # Build URL using utility function
-            url = build_ubus_url(host, use_https)
+            if port is None:
+                port = DEFAULT_HTTPS_PORT if use_https else DEFAULT_HTTP_PORT
+            url = build_ubus_url(host, use_https, port=port, endpoint=endpoint)
 
             _LOGGER.info("Starting diagnostic connection test to %s://%s", protocol, host)
 
@@ -152,6 +163,8 @@ class ConnectionDiagnostics:
         results["details"]["use_https"] = use_https
         results["details"]["verify_ssl"] = verify_ssl
         results["details"]["cert_path"] = cert_path if cert_path else None
+        results["details"]["port"] = port
+        results["details"]["endpoint"] = endpoint
 
         return results
 
@@ -217,4 +230,6 @@ class ConnectionDiagnostics:
             use_https=config_data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS),
             verify_ssl=config_data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
             cert_path=config_data.get(CONF_CERT_PATH),
+            port=config_data.get(CONF_PORT),
+            endpoint=config_data.get(CONF_ENDPOINT, DEFAULT_ENDPOINT),
         )

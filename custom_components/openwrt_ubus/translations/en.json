@@ -8,6 +8,12 @@
           "host": "Host",
           "username": "Username",
           "password": "Password",
+          "use_https": "Use HTTPS",
+          "verify_ssl": "Verify SSL Certificate",
+          "cert_path": "Custom Certificate Path (optional)",
+          "port": "Port (optional)",
+          "endpoint": "API Endpoint",
+          "tracking_method": "Tracking Method",
           "wireless_software": "Wireless Software",
           "dhcp_software": "DHCP Software"
         }
@@ -21,7 +27,9 @@
           "enable_sta_sensors": "Enable Station Device Sensors",
           "enable_ap_sensors": "Enable Access Point Sensors",
           "enable_service_controls": "Enable Service Controls",
-          "enable_device_kick_buttons": "Enable Device Kick Buttons (requires hostapd)"
+          "enable_device_kick_buttons": "Enable Device Kick Buttons (requires hostapd)",
+          "enable_wired_tracking": "Enable Wired Device Tracking",
+          "tracking_method": "Tracking Method"
         }
       },
       "services": {
@@ -61,6 +69,9 @@
         "description": "Configure sensor types, timeouts, and other options for your OpenWrt device",
         "data": {
           "wireless_software": "Wireless Software",
+          "tracking_method": "Tracking Method",
+          "port": "Port",
+          "endpoint": "API Endpoint",
           "dhcp_software": "DHCP Software", 
           "enable_system_sensors": "Enable System Sensors",
           "enable_qmodem_sensors": "Enable QModem Sensors",
@@ -72,7 +83,9 @@
           "system_sensor_timeout": "System Sensor Update Interval (seconds)",
           "qmodem_sensor_timeout": "QModem Sensor Update Interval (seconds)",
           "sta_sensor_timeout": "Station Device Sensor Update Interval (seconds)",
-          "ap_sensor_timeout": "Access Point Sensor Update Interval (seconds)"
+          "ap_sensor_timeout": "Access Point Sensor Update Interval (seconds)",
+          "service_timeout": "Service Status Update Interval (seconds)",
+          "enable_wired_tracking": "Enable Wired Device Tracking"
         },
         "data_description": {
           "wireless_software": "Software used to get wireless information (iwinfo or hostapd)",

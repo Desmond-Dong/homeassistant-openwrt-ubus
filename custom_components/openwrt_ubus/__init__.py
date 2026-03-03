@@ -21,6 +21,8 @@ from .const import (
     CONF_USE_HTTPS,
     CONF_VERIFY_SSL,
     CONF_CERT_PATH,
+    CONF_PORT,
+    CONF_ENDPOINT,
     CONF_ENABLE_QMODEM_SENSORS,
     CONF_ENABLE_STA_SENSORS,
     CONF_ENABLE_SYSTEM_SENSORS,
@@ -28,6 +30,10 @@ from .const import (
     DEFAULT_DHCP_SOFTWARE,
     DEFAULT_WIRELESS_SOFTWARE,
     DEFAULT_USE_HTTPS,
+    DEFAULT_VERIFY_SSL,
+    DEFAULT_HTTP_PORT,
+    DEFAULT_HTTPS_PORT,
+    DEFAULT_ENDPOINT,
     DEFAULT_ENABLE_QMODEM_SENSORS,
     DEFAULT_ENABLE_STA_SENSORS,
     DEFAULT_ENABLE_SYSTEM_SENSORS,
@@ -86,12 +92,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Test connection before setting up platforms
     try:
         # Build URL using utility function
-        use_https = entry.data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS)
-        url = build_ubus_url(entry.data[CONF_HOST], use_https)
+        use_https = get_config_value(entry, CONF_USE_HTTPS, DEFAULT_USE_HTTPS)
+        port = get_config_value(
+            entry,
+            CONF_PORT,
+            DEFAULT_HTTPS_PORT if use_https else DEFAULT_HTTP_PORT,
+        )
+        endpoint = get_config_value(entry, CONF_ENDPOINT, DEFAULT_ENDPOINT)
+        url = build_ubus_url(entry.data[CONF_HOST], use_https, port=port, endpoint=endpoint)
 
         # Configure SSL verification
-        verify_ssl = entry.data.get(CONF_VERIFY_SSL, False)
-        cert_path = entry.data.get(CONF_CERT_PATH)
+        verify_ssl = get_config_value(entry, CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
+        cert_path = get_config_value(entry, CONF_CERT_PATH, None)
 
         # If using HTTPS with unverified SSL, warn user
         if use_https and not verify_ssl:

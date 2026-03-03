@@ -22,6 +22,8 @@ from .const import (
     CONF_USE_HTTPS,
     CONF_VERIFY_SSL,
     CONF_CERT_PATH,
+    CONF_PORT,
+    CONF_ENDPOINT,
     CONF_SYSTEM_SENSOR_TIMEOUT,
     CONF_QMODEM_SENSOR_TIMEOUT,
     CONF_STA_SENSOR_TIMEOUT,
@@ -30,6 +32,9 @@ from .const import (
     CONF_ENABLE_WIRED_TRACKING,
     DEFAULT_USE_HTTPS,
     DEFAULT_VERIFY_SSL,
+    DEFAULT_HTTP_PORT,
+    DEFAULT_HTTPS_PORT,
+    DEFAULT_ENDPOINT,
     DEFAULT_SYSTEM_SENSOR_TIMEOUT,
     DEFAULT_QMODEM_SENSOR_TIMEOUT,
     DEFAULT_STA_SENSOR_TIMEOUT,
@@ -104,26 +109,11 @@ class SharedUbusDataManager:
         self._last_update: Dict[str, datetime] = {}
 
         # Get timeout values from configuration (priority: options > data > default)
-        system_timeout = entry.options.get(
-            CONF_SYSTEM_SENSOR_TIMEOUT,
-            entry.data.get(CONF_SYSTEM_SENSOR_TIMEOUT, DEFAULT_SYSTEM_SENSOR_TIMEOUT)
-        )
-        qmodem_timeout = entry.options.get(
-            CONF_QMODEM_SENSOR_TIMEOUT,
-            entry.data.get(CONF_QMODEM_SENSOR_TIMEOUT, DEFAULT_QMODEM_SENSOR_TIMEOUT)
-        )
-        sta_timeout = entry.options.get(
-            CONF_STA_SENSOR_TIMEOUT,
-            entry.data.get(CONF_STA_SENSOR_TIMEOUT, DEFAULT_STA_SENSOR_TIMEOUT)
-        )
-        ap_timeout = entry.options.get(
-            CONF_AP_SENSOR_TIMEOUT,
-            entry.data.get(CONF_AP_SENSOR_TIMEOUT, DEFAULT_AP_SENSOR_TIMEOUT)
-        )
-        service_timeout = entry.options.get(
-            CONF_SERVICE_TIMEOUT,
-            entry.data.get(CONF_SERVICE_TIMEOUT, DEFAULT_SERVICE_TIMEOUT)
-        )
+        system_timeout = get_config_value(entry, CONF_SYSTEM_SENSOR_TIMEOUT, DEFAULT_SYSTEM_SENSOR_TIMEOUT)
+        qmodem_timeout = get_config_value(entry, CONF_QMODEM_SENSOR_TIMEOUT, DEFAULT_QMODEM_SENSOR_TIMEOUT)
+        sta_timeout = get_config_value(entry, CONF_STA_SENSOR_TIMEOUT, DEFAULT_STA_SENSOR_TIMEOUT)
+        ap_timeout = get_config_value(entry, CONF_AP_SENSOR_TIMEOUT, DEFAULT_AP_SENSOR_TIMEOUT)
+        service_timeout = get_config_value(entry, CONF_SERVICE_TIMEOUT, DEFAULT_SERVICE_TIMEOUT)
 
         self._update_intervals: Dict[str, timedelta] = {
             "system_info": timedelta(seconds=system_timeout),
@@ -158,15 +148,21 @@ class SharedUbusDataManager:
                 self._session = async_get_clientsession(self.hass)
 
             # Build URL using utility function
-            use_https = self.entry.data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS)
-            url = build_ubus_url(self.entry.data[CONF_HOST], use_https)
+            use_https = get_config_value(self.entry, CONF_USE_HTTPS, DEFAULT_USE_HTTPS)
+            port = get_config_value(
+                self.entry,
+                CONF_PORT,
+                DEFAULT_HTTPS_PORT if use_https else DEFAULT_HTTP_PORT,
+            )
+            endpoint = get_config_value(self.entry, CONF_ENDPOINT, DEFAULT_ENDPOINT)
+            url = build_ubus_url(self.entry.data[CONF_HOST], use_https, port=port, endpoint=endpoint)
 
             username = self.entry.data[CONF_USERNAME]
             password = self.entry.data[CONF_PASSWORD]
 
             # Get SSL verification settings
-            verify_ssl = self.entry.data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
-            cert_path = self.entry.data.get(CONF_CERT_PATH)
+            verify_ssl = get_config_value(self.entry, CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
+            cert_path = get_config_value(self.entry, CONF_CERT_PATH, None)
 
             # Use enhanced client factory for proper SSL handling
             client = create_enhanced_extended_ubus_client(
@@ -317,8 +313,8 @@ class SharedUbusDataManager:
     @ubus_auto_reconnect(max_retries=1)
     async def _fetch_device_statistics(self) -> Dict[str, Any]:
         """Fetch device statistics from wireless interfaces."""
-        wireless_software = self.entry.data.get(CONF_WIRELESS_SOFTWARE, "iwinfo")
-        dhcp_software = self.entry.data.get(CONF_DHCP_SOFTWARE, "dnsmasq")
+        wireless_software = get_config_value(self.entry, CONF_WIRELESS_SOFTWARE, "iwinfo")
+        dhcp_software = get_config_value(self.entry, CONF_DHCP_SOFTWARE, "dnsmasq")
 
         try:
             # Get MAC to name/IP mapping first

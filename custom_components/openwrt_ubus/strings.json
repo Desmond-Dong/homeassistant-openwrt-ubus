@@ -11,6 +11,9 @@
           "use_https": "Use HTTPS",
           "verify_ssl": "Verify SSL Certificate",
           "cert_path": "Custom Certificate Path (optional)",
+          "port": "Port (optional)",
+          "endpoint": "API Endpoint",
+          "tracking_method": "Tracking Method",
           "wireless_software": "Wireless Software",
           "dhcp_software": "DHCP Software"
         }
@@ -26,7 +29,8 @@
           "enable_eth_sensors": "Enable Network Interface Sensors",
           "enable_service_controls": "Enable Service Controls",
           "enable_device_kick_buttons": "Enable Device Kick Buttons (requires hostapd)",
-          "enable_wired_tracking": "Enable Wired Device Tracking"
+          "enable_wired_tracking": "Enable Wired Device Tracking",
+          "tracking_method": "Tracking Method"
         }
       },
       "services": {
@@ -67,6 +71,9 @@
         "description": "Configure sensors, timeouts and software settings for {host}",
         "data": {
           "wireless_software": "Wireless Software",
+          "tracking_method": "Tracking Method",
+          "port": "Port",
+          "endpoint": "API Endpoint",
           "dhcp_software": "DHCP Software",
           "enable_system_sensors": "Enable System Sensors",
           "enable_qmodem_sensors": "Enable QModem Sensors",
@@ -80,6 +87,7 @@
           "qmodem_sensor_timeout": "QModem Sensor Update Interval (seconds)",
           "sta_sensor_timeout": "Station Sensor Update Interval (seconds)",
           "ap_sensor_timeout": "AP Sensor Update Interval (seconds)",
+          "service_timeout": "Service Status Update Interval (seconds)",
           "refresh_services": "Refresh Services List"
         }
       },

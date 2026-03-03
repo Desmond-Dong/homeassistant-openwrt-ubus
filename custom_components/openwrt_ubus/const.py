@@ -12,12 +12,17 @@ CONF_USE_HTTPS = "use_https"
 CONF_VERIFY_SSL = "verify_ssl"
 CONF_CERT_PATH = "cert_path"
 CONF_PORT = "port"
+CONF_ENDPOINT = "endpoint"
+CONF_TRACKING_METHOD = "tracking_method"
 DEFAULT_DHCP_SOFTWARE = "dnsmasq"
 DEFAULT_WIRELESS_SOFTWARE = "iwinfo"
 DEFAULT_USE_HTTPS = False
 DEFAULT_VERIFY_SSL = False  # Default to not verifying SSL for self-signed certificates
 DEFAULT_HTTP_PORT = 80
 DEFAULT_HTTPS_PORT = 443
+DEFAULT_ENDPOINT = "ubus"
+TRACKING_METHODS = ["combined", "uniqueid"]
+DEFAULT_TRACKING_METHOD = "combined"
 DHCP_SOFTWARES = ["dnsmasq", "odhcpd", "none"]
 WIRELESS_SOFTWARES = ["hostapd", "iwinfo", "none"]
 
@@ -101,6 +106,7 @@ def build_ubus_url(
     host: str,
     use_https: bool = False,
     port: int | None = None,
+    endpoint: str | None = None,
 ) -> str:
     """Build the ubus API URL.
 
@@ -108,6 +114,7 @@ def build_ubus_url(
         host: The hostname or IP address of the OpenWrt device
         use_https: Whether to use HTTPS (default: False)
         port: Optional custom port (default: 443 for HTTPS, 80 for HTTP)
+        endpoint: Optional ubus endpoint path (default: "ubus")
 
     Returns:
         The complete ubus API URL
@@ -115,11 +122,12 @@ def build_ubus_url(
     protocol = "https" if use_https else "http"
     if port is None:
         port = DEFAULT_HTTPS_PORT if use_https else DEFAULT_HTTP_PORT
+    endpoint = endpoint.strip("/") if endpoint else DEFAULT_ENDPOINT
 
     # Only include port in URL if it's non-standard
     if (use_https and port == DEFAULT_HTTPS_PORT) or (not use_https and port == DEFAULT_HTTP_PORT):
-        return f"{protocol}://{host}/ubus"
-    return f"{protocol}://{host}:{port}/ubus"
+        return f"{protocol}://{host}/{endpoint}"
+    return f"{protocol}://{host}:{port}/{endpoint}"
 
 
 def get_config_value(entry, key: str, default):

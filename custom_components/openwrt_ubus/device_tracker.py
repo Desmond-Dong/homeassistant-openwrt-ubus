@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 
 import voluptuous as vol
@@ -26,11 +26,15 @@ from .const import (
     CONF_DHCP_SOFTWARE,
     CONF_WIRELESS_SOFTWARE,
     CONF_ENABLE_WIRED_TRACKING,
+    CONF_TRACKING_METHOD,
     DEFAULT_DHCP_SOFTWARE,
     DEFAULT_WIRELESS_SOFTWARE,
     DEFAULT_ENABLE_WIRED_TRACKING,
+    DEFAULT_TRACKING_METHOD,
     DHCP_SOFTWARES,
     DOMAIN,
+    get_config_value,
+    TRACKING_METHODS,
     WIRELESS_SOFTWARES,
 )
 from .shared_data_manager import SharedDataUpdateCoordinator
@@ -38,6 +42,14 @@ from .shared_data_manager import SharedDataUpdateCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(seconds=30)
+CONNECTION_TYPE_GRACE_PERIOD = timedelta(minutes=3)
+
+
+def _generate_unique_id(host: str, mac_address: str, tracking_method: str) -> str:
+    """Generate unique id based on tracking method."""
+    if tracking_method == "uniqueid":
+        return mac_address
+    return f"{host}_{mac_address}"
 
 PLATFORM_SCHEMA = DEVICE_TRACKER_PLATFORM_SCHEMA.extend(
     {
@@ -49,6 +61,9 @@ PLATFORM_SCHEMA = DEVICE_TRACKER_PLATFORM_SCHEMA.extend(
         ),
         vol.Optional(CONF_DHCP_SOFTWARE, default=DEFAULT_DHCP_SOFTWARE): vol.In(
             DHCP_SOFTWARES
+        ),
+        vol.Optional(CONF_TRACKING_METHOD, default=DEFAULT_TRACKING_METHOD): vol.In(
+            TRACKING_METHODS
         ),
     }
 )
@@ -66,10 +81,8 @@ async def async_setup_entry(
     data_manager = hass.data[DOMAIN][data_manager_key]
 
     # Check if wired tracking is enabled
-    enable_wired = entry.options.get(
-        CONF_ENABLE_WIRED_TRACKING,
-        entry.data.get(CONF_ENABLE_WIRED_TRACKING, DEFAULT_ENABLE_WIRED_TRACKING)
-    )
+    enable_wired = get_config_value(entry, CONF_ENABLE_WIRED_TRACKING, DEFAULT_ENABLE_WIRED_TRACKING)
+    tracking_method = get_config_value(entry, CONF_TRACKING_METHOD, DEFAULT_TRACKING_METHOD)
 
     # Determine data types to fetch
     data_types = ["device_statistics"]
@@ -91,6 +104,7 @@ async def async_setup_entry(
     coordinator.async_add_entities = async_add_entities
     coordinator.mac2name = {}  # For storing DHCP mappings
     coordinator.enable_wired = enable_wired  # Store wired tracking setting
+    coordinator.tracking_method = tracking_method
 
     # Initialize known_devices from existing entity registry entries
     await _restore_known_devices_from_registry(hass, entry, coordinator)
@@ -112,7 +126,9 @@ async def async_setup_entry(
         # Get wired devices if enabled
         if coordinator.enable_wired and "wired_devices" in coordinator.data:
             wired_stats = coordinator.data["wired_devices"]
-            current_devices.update(wired_stats.keys())
+            current_devices.update(
+                mac for mac, data in wired_stats.items() if data.get("connected", False)
+            )
 
         new_devices = current_devices - coordinator.known_devices
 
@@ -145,7 +161,9 @@ async def async_setup_entry(
         # Get wired devices if enabled
         if coordinator.enable_wired and coordinator.data.get("wired_devices"):
             wired_stats = coordinator.data["wired_devices"]
-            device_macs.update(wired_stats.keys())
+            device_macs.update(
+                mac for mac, data in wired_stats.items() if data.get("connected", False)
+            )
 
     if device_macs:
         _LOGGER.info("Initial scan found %d devices", len(device_macs))
@@ -173,9 +191,11 @@ async def _restore_known_devices_from_registry(
         if entity_entry.domain == "device_tracker" and entity_entry.platform == DOMAIN:
             # Extract MAC address from unique_id (format: "{host}_{mac_address}")
             if entity_entry.unique_id and "_" in entity_entry.unique_id:
-                mac_address = entity_entry.unique_id.split("_", 1)[1].upper()  # Normalize to uppercase
+                mac_address = entity_entry.unique_id.rsplit("_", 1)[-1].upper()  # Normalize to uppercase
                 coordinator.known_devices.add(mac_address)
                 _LOGGER.debug("Restored known device from registry: %s", mac_address)
+            elif entity_entry.unique_id:
+                coordinator.known_devices.add(entity_entry.unique_id.upper())
 
 
 async def _create_entities_for_devices(hass: HomeAssistant, entry: ConfigEntry,
@@ -194,10 +214,43 @@ async def _create_entities_for_devices(hass: HomeAssistant, entry: ConfigEntry,
             continue
 
         # Check if entity already exists in registry
-        unique_id = f"{entry.data[CONF_HOST]}_{mac_address}"
+        unique_id = _generate_unique_id(
+            entry.data[CONF_HOST],
+            mac_address,
+            coordinator.tracking_method,
+        )
+        alt_tracking_method = "uniqueid" if coordinator.tracking_method == "combined" else "combined"
+        alt_unique_id = _generate_unique_id(
+            entry.data[CONF_HOST],
+            mac_address,
+            alt_tracking_method,
+        )
         existing_entity_id = entity_registry.async_get_entity_id(
             "device_tracker", DOMAIN, unique_id
         )
+
+        # Backward compatibility for tracking method changes.
+        if not existing_entity_id:
+            existing_entity_id = entity_registry.async_get_entity_id(
+                "device_tracker", DOMAIN, alt_unique_id
+            )
+            if existing_entity_id and alt_unique_id != unique_id:
+                try:
+                    entity_registry.async_update_entity(existing_entity_id, new_unique_id=unique_id)
+                    _LOGGER.debug(
+                        "Migrated tracking unique_id for %s: %s -> %s",
+                        mac_address,
+                        alt_unique_id,
+                        unique_id,
+                    )
+                except Exception as exc:
+                    _LOGGER.debug(
+                        "Could not migrate tracking unique_id for %s (%s -> %s): %s",
+                        mac_address,
+                        alt_unique_id,
+                        unique_id,
+                        exc,
+                    )
 
         if existing_entity_id:
             _LOGGER.debug(
@@ -231,9 +284,12 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
         super().__init__(coordinator)
         self.mac_address = mac_address
         self._host = coordinator.data_manager.entry.data[CONF_HOST]
-        self._attr_unique_id = f"{self._host}_{mac_address}"
+        self._tracking_method = getattr(coordinator, "tracking_method", DEFAULT_TRACKING_METHOD)
+        self._attr_unique_id = _generate_unique_id(self._host, mac_address, self._tracking_method)
         self._attr_name = None  # Will be set dynamically
         self._attr_entity_registry_enabled_default = True  # Enable by default
+        self._last_connection_type = "unknown"
+        self._last_wireless_seen: datetime | None = None
 
     def _get_device_data(self) -> tuple[dict | None, str]:
         """Get device data from coordinator, checking both wireless and wired sources.
@@ -249,15 +305,40 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
         device_stats = self.coordinator.data.get("device_statistics", {})
         device_data = device_stats.get(self.mac_address) or device_stats.get(self.mac_address.upper())
         if device_data:
-            return device_data, device_data.get("connection_type", "wireless")
+            connection_type = device_data.get("connection_type", "wireless")
+            if connection_type == "wireless" and device_data.get("connected", False):
+                self._last_wireless_seen = datetime.now()
+            self._last_connection_type = connection_type
+            return device_data, connection_type
 
         # Then check wired_devices
         wired_stats = self.coordinator.data.get("wired_devices", {})
         device_data = wired_stats.get(self.mac_address) or wired_stats.get(self.mac_address.upper())
         if device_data:
-            return device_data, device_data.get("connection_type", "wired")
+            is_connected = bool(device_data.get("connected", False))
+            recently_wireless = (
+                self._last_connection_type == "wireless"
+                and self._last_wireless_seen is not None
+                and datetime.now() - self._last_wireless_seen <= CONNECTION_TYPE_GRACE_PERIOD
+            )
 
-        return None, "unknown"
+            if is_connected:
+                if recently_wireless:
+                    # ARP entries can linger after Wi-Fi disconnects; during a short
+                    # grace window, prefer prior wireless type and mark disconnected.
+                    fallback_data = dict(device_data)
+                    fallback_data["connected"] = False
+                    return fallback_data, "wireless"
+
+                connection_type = device_data.get("connection_type", "wired")
+                self._last_connection_type = connection_type
+                return device_data, connection_type
+
+            # Keep previous connection type for disconnected devices to avoid
+            # classifying dropped wireless clients as wired.
+            return device_data, self._last_connection_type
+
+        return None, self._last_connection_type
 
     @property
     def device_info(self) -> DeviceInfo:

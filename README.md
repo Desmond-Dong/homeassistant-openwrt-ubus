@@ -177,8 +177,12 @@ EOF
 | 🏠 **Host** | Router IP address | - | Any valid IP address |
 | 👤 **Username** | Login username | - | Usually 'root' |
 | 🔑 **Password** | Login password | - | Router admin password |
+| 🔌 **Port** | OpenWrt ubus web port | 80/443 | 1-65535 |
+| 🧭 **Endpoint** | ubus API path | ubus | Any valid path |
+| 🧠 **Tracking Method** | Device tracker unique ID strategy | combined | combined, uniqueid |
 | 📡 **Wireless Software** | Wireless monitoring method | iwinfo | iwinfo, hostapd, none |
 | 🌐 **DHCP Software** | DHCP client detection | dnsmasq | dnsmasq, odhcpd, none |
+| 🖧 **Wired Tracking** | Track LAN clients from ARP/neigh | Disabled | Enabled/Disabled |
 | ⏱️ **System Timeout** | System data fetch timeout | 30s | 5s-300s |
 | 📊 **QModem Timeout** | QModem data fetch timeout | 30s | 5s-300s |
 | ⚙️ **Service Timeout** | Service control timeout | 30s | 5s-300s |

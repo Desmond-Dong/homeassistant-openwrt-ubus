@@ -21,6 +21,9 @@ from .const import (
     CONF_USE_HTTPS,
     CONF_VERIFY_SSL,
     CONF_CERT_PATH,
+    CONF_PORT,
+    CONF_ENDPOINT,
+    CONF_TRACKING_METHOD,
     CONF_ENABLE_QMODEM_SENSORS,
     CONF_ENABLE_STA_SENSORS,
     CONF_ENABLE_SYSTEM_SENSORS,
@@ -39,6 +42,10 @@ from .const import (
     DEFAULT_WIRELESS_SOFTWARE,
     DEFAULT_USE_HTTPS,
     DEFAULT_VERIFY_SSL,
+    DEFAULT_HTTP_PORT,
+    DEFAULT_HTTPS_PORT,
+    DEFAULT_ENDPOINT,
+    DEFAULT_TRACKING_METHOD,
     DEFAULT_ENABLE_QMODEM_SENSORS,
     DEFAULT_ENABLE_STA_SENSORS,
     DEFAULT_ENABLE_SYSTEM_SENSORS,
@@ -54,6 +61,7 @@ from .const import (
     DEFAULT_SERVICE_TIMEOUT,
     DHCP_SOFTWARES,
     DOMAIN,
+    TRACKING_METHODS,
     WIRELESS_SOFTWARES,
     API_SUBSYS_RC,
     API_METHOD_LIST,
@@ -74,6 +82,9 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Optional(CONF_USE_HTTPS, default=DEFAULT_USE_HTTPS): bool,
         vol.Optional(CONF_VERIFY_SSL, default=DEFAULT_VERIFY_SSL): bool,
         vol.Optional(CONF_CERT_PATH): str,
+        vol.Optional(CONF_PORT): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
+        vol.Optional(CONF_ENDPOINT, default=DEFAULT_ENDPOINT): str,
+        vol.Optional(CONF_TRACKING_METHOD, default=DEFAULT_TRACKING_METHOD): vol.In(TRACKING_METHODS),
         vol.Optional(CONF_WIRELESS_SOFTWARE, default=DEFAULT_WIRELESS_SOFTWARE): vol.In(
             WIRELESS_SOFTWARES
         ),
@@ -129,7 +140,10 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
 
     # Build URL using utility function
     use_https = data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS)
-    url = build_ubus_url(data[CONF_HOST], use_https)
+    default_port = DEFAULT_HTTPS_PORT if use_https else DEFAULT_HTTP_PORT
+    port = data.get(CONF_PORT, default_port)
+    endpoint = (data.get(CONF_ENDPOINT, DEFAULT_ENDPOINT) or DEFAULT_ENDPOINT).strip("/")
+    url = build_ubus_url(data[CONF_HOST], use_https, port=port, endpoint=endpoint)
 
     # Configure SSL verification
     verify_ssl = data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
@@ -216,7 +230,10 @@ async def get_services_list(hass: HomeAssistant, data: dict[str, Any]) -> list[s
 
     # Build URL using utility function
     use_https = data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS)
-    url = build_ubus_url(data[CONF_HOST], use_https)
+    default_port = DEFAULT_HTTPS_PORT if use_https else DEFAULT_HTTP_PORT
+    port = data.get(CONF_PORT, default_port)
+    endpoint = (data.get(CONF_ENDPOINT, DEFAULT_ENDPOINT) or DEFAULT_ENDPOINT).strip("/")
+    url = build_ubus_url(data[CONF_HOST], use_https, port=port, endpoint=endpoint)
 
     # Configure SSL verification
     verify_ssl = data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
@@ -416,13 +433,28 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
             return self.async_create_entry(title="", data={})
 
         # Create form with all configurable options
-        current_data = self.config_entry.data
+        current_data = {**self.config_entry.data, **self.config_entry.options}
         options_schema = vol.Schema(
             {
                 vol.Optional(
                     CONF_WIRELESS_SOFTWARE,
                     default=current_data.get(CONF_WIRELESS_SOFTWARE, DEFAULT_WIRELESS_SOFTWARE)
                 ): vol.In(WIRELESS_SOFTWARES),
+                vol.Optional(
+                    CONF_TRACKING_METHOD,
+                    default=current_data.get(CONF_TRACKING_METHOD, DEFAULT_TRACKING_METHOD)
+                ): vol.In(TRACKING_METHODS),
+                vol.Optional(
+                    CONF_PORT,
+                    default=current_data.get(
+                        CONF_PORT,
+                        DEFAULT_HTTPS_PORT if current_data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS) else DEFAULT_HTTP_PORT,
+                    )
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
+                vol.Optional(
+                    CONF_ENDPOINT,
+                    default=current_data.get(CONF_ENDPOINT, DEFAULT_ENDPOINT)
+                ): str,
                 vol.Optional(
                     CONF_DHCP_SOFTWARE,
                     default=current_data.get(CONF_DHCP_SOFTWARE, DEFAULT_DHCP_SOFTWARE)
@@ -475,6 +507,10 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
                     CONF_AP_SENSOR_TIMEOUT,
                     default=current_data.get(CONF_AP_SENSOR_TIMEOUT, DEFAULT_AP_SENSOR_TIMEOUT)
                 ): vol.All(vol.Coerce(int), vol.Range(min=30, max=600)),
+                vol.Optional(
+                    CONF_SERVICE_TIMEOUT,
+                    default=current_data.get(CONF_SERVICE_TIMEOUT, DEFAULT_SERVICE_TIMEOUT)
+                ): vol.All(vol.Coerce(int), vol.Range(min=10, max=300)),
                 vol.Optional("refresh_services", default=False): bool,
             }
         )

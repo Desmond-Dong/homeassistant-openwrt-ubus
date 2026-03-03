@@ -665,6 +665,25 @@ class ExtendedUbus(Ubus):
             _LOGGER.debug("Error reading ARP table: %s", exc)
             return []
 
+    async def get_ip_neigh_table(self) -> list[dict]:
+        """Read and parse neighbor table from `ip neigh`.
+
+        Expected line examples:
+        - 192.168.1.10 dev br-lan lladdr AA:BB:CC:DD:EE:FF REACHABLE
+        - 192.168.1.20 dev br-lan lladdr AA:BB:CC:DD:EE:11 STALE
+        """
+        try:
+            ip_neigh = await self.api_call(API_RPC_CALL, API_SUBSYS_FILE, "exec", {
+                "command": "ip",
+                "params": ["neigh", "show"]
+            })
+            if not ip_neigh or "stdout" not in ip_neigh:
+                return []
+            return self.parse_ip_neigh_table(ip_neigh["stdout"])
+        except Exception as exc:
+            _LOGGER.debug("Error reading ip neigh table: %s", exc)
+            return []
+
     def parse_arp_table(self, arp_data: str) -> list[dict]:
         """Parse ARP table data from /proc/net/arp.
 
@@ -718,6 +737,40 @@ class ExtendedUbus(Ubus):
 
         return arp_entries
 
+    def parse_ip_neigh_table(self, neigh_data: str) -> list[dict]:
+        """Parse `ip neigh show` output."""
+        neigh_entries = []
+        if not neigh_data:
+            return neigh_entries
+
+        for line in neigh_data.strip().split("\n"):
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+
+            ip_addr = parts[0]
+            device = ""
+            mac_addr = ""
+            state = parts[-1].lower()
+
+            for i, token in enumerate(parts):
+                if token == "dev" and i + 1 < len(parts):
+                    device = parts[i + 1]
+                elif token == "lladdr" and i + 1 < len(parts):
+                    mac_addr = parts[i + 1].upper()
+
+            if not mac_addr or mac_addr == "00:00:00:00:00:00":
+                continue
+
+            neigh_entries.append({
+                "ip": ip_addr,
+                "mac": mac_addr,
+                "device": device,
+                "state": state,
+            })
+
+        return neigh_entries
+
     async def get_wired_devices(self, wireless_macs: set[str] | None = None) -> dict[str, dict]:
         """Get wired devices by combining ARP table with host hints.
 
@@ -738,13 +791,17 @@ class ExtendedUbus(Ubus):
         # Normalize wireless MACs to uppercase for comparison
         wireless_macs_upper = {mac.upper() for mac in wireless_macs}
 
-        # Get ARP table entries
+        # Get ARP and neighbor table entries
         arp_entries = await self.get_arp_table()
+        neigh_entries = await self.get_ip_neigh_table()
 
         # Get host hints for name/IP mapping
         host_hints = await self.get_host_hints()
 
         wired_devices = {}
+
+        # Build neighbor index by MAC for confidence scoring
+        neigh_by_mac = {entry["mac"]: entry for entry in neigh_entries}
 
         for entry in arp_entries:
             mac = entry["mac"]
@@ -764,8 +821,27 @@ class ExtendedUbus(Ubus):
                 hint = host_hints.get(mac.lower(), {})
                 hostname = hint.get("name", "")
 
-            # Determine connection state
-            connected = entry["state"] in ("reachable", "permanent")
+            # Determine connection state with ARP + ip neigh fusion
+            arp_connected = entry["state"] in ("reachable", "permanent")
+            neigh_entry = neigh_by_mac.get(mac)
+            neigh_state = neigh_entry.get("state") if neigh_entry else None
+            neigh_connected = neigh_state in (
+                "reachable",
+                "delay",
+                "probe",
+                "permanent",
+            )
+            connected = arp_connected or neigh_connected
+
+            interface = entry["device"]
+            if neigh_entry and neigh_entry.get("device"):
+                interface = neigh_entry["device"]
+
+            confidence = "low"
+            if arp_connected and neigh_connected:
+                confidence = "high"
+            elif arp_connected or neigh_connected:
+                confidence = "medium"
 
             wired_devices[mac] = {
                 "ip_address": entry["ip"],
@@ -774,7 +850,9 @@ class ExtendedUbus(Ubus):
                 "connection_type": "wired",
                 "ap_device": "LAN",
                 "arp_state": entry["state"],
-                "interface": entry["device"]
+                "neighbor_state": neigh_state,
+                "confidence": confidence,
+                "interface": interface,
             }
 
             _LOGGER.debug(

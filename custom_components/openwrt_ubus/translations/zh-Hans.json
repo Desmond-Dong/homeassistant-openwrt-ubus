@@ -11,6 +11,9 @@
           "use_https": "使用 HTTPS",
           "verify_ssl": "验证 SSL 证书",
           "cert_path": "自定义证书路径（可选）",
+          "port": "端口（可选）",
+          "endpoint": "API 路径",
+          "tracking_method": "跟踪模式",
           "wireless_software": "无线软件",
           "dhcp_software": "DHCP 软件"
         }
@@ -24,7 +27,9 @@
           "enable_sta_sensors": "启用站点（WiFi设备）传感器",
           "enable_ap_sensors": "启用接入点传感器",
           "enable_service_controls": "启用服务控制",
-          "enable_device_kick_buttons": "启用设备踢出按钮（需要hostapd）"
+          "enable_device_kick_buttons": "启用设备踢出按钮（需要hostapd）",
+          "enable_wired_tracking": "启用有线设备跟踪",
+          "tracking_method": "跟踪模式"
         }
       },
       "services": {
@@ -64,6 +69,9 @@
         "description": "配置 {host} 的传感器、超时时间和软件设置",
         "data": {
           "wireless_software": "无线软件",
+          "tracking_method": "跟踪模式",
+          "port": "端口",
+          "endpoint": "API 路径",
           "dhcp_software": "DHCP 软件",
           "enable_system_sensors": "启用系统传感器",
           "enable_qmodem_sensors": "启用调制解调器传感器",
@@ -75,7 +83,9 @@
           "system_sensor_timeout": "系统传感器更新间隔（秒）",
           "qmodem_sensor_timeout": "调制解调器传感器更新间隔（秒）",
           "sta_sensor_timeout": "站点传感器更新间隔（秒）",
-          "ap_sensor_timeout": "接入点传感器更新间隔（秒）"
+          "ap_sensor_timeout": "接入点传感器更新间隔（秒）",
+          "service_timeout": "服务状态更新间隔（秒）",
+          "enable_wired_tracking": "启用有线设备跟踪"
         }
       },
       "sensors": {
