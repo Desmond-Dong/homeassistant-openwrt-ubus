@@ -296,6 +296,13 @@ Monitor and manage wireless access points with detailed status information and c
 - **Performance Metrics**: Bandwidth utilization and throughput statistics
 - **Coverage Analysis**: Signal propagation and coverage quality data
 
+### 🗺️ Topology Visualization
+
+- **Integration-native view**: Adds a dedicated topology visualization page for this integration instead of a Lovelace card
+- **Relationship graph**: Displays router, AP, wireless clients, and wired clients in one graph
+- **Live status**: Shows online/offline state, signal strength, wired interface, and neighbor confidence
+- **Device drill-down**: Click nodes to jump to the related Home Assistant device page
+
 ---
 
 ### 🎛️ Service Control & System Management

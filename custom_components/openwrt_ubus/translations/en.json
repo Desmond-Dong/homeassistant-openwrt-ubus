@@ -65,6 +65,15 @@
   "options": {
     "step": {
       "init": {
+        "title": "OpenWrt ubus",
+        "description": "Choose what you want to open for your OpenWrt device",
+        "menu_options": {
+          "configure": "Configure",
+          "topology": "Open Topology",
+          "services": "Services"
+        }
+      },
+      "configure": {
         "title": "Configure OpenWrt ubus Integration",
         "description": "Configure sensor types, timeouts, and other options for your OpenWrt device",
         "data": {
@@ -99,6 +108,10 @@
           "sta_sensor_timeout": "How often to update station device data (10-300 seconds)",
           "ap_sensor_timeout": "How often to update access point data (30-600 seconds)"
         }
+      },
+      "topology": {
+        "title": "Open Topology",
+        "description": "Open the topology visualization page"
       }
     }
   },

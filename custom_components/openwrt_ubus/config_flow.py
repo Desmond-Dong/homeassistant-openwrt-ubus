@@ -73,6 +73,8 @@ from .security_utils import safe_log_data
 
 _LOGGER = logging.getLogger(__name__)
 
+TOPOLOGY_PANEL_PATH = "/openwrt-ubus-topology"
+
 # Step 1: Connection configuration
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -412,6 +414,27 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        """Show options menu."""
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["configure", "topology", "services"],
+        )
+
+    async def async_step_topology(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Open topology page from options menu."""
+        return self.async_external_step(step_id="topology", url=TOPOLOGY_PANEL_PATH)
+
+    async def async_step_topology_done(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Return from topology page."""
+        return await self.async_step_init()
+
+    async def async_step_configure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Manage the options."""
         if user_input is not None:
             # Check if we need to refresh services
@@ -516,10 +539,10 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
         )
 
         return self.async_show_form(
-            step_id="init",
+            step_id="configure",
             data_schema=options_schema,
             description_placeholders={
-                "host": self.config_entry.data[CONF_HOST]
+                "host": self.config_entry.data[CONF_HOST],
             }
         )
 

@@ -43,6 +43,7 @@ _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(seconds=30)
 CONNECTION_TYPE_GRACE_PERIOD = timedelta(minutes=3)
+OFFLINE_GRACE_PERIOD = timedelta(seconds=90)
 
 
 def _generate_unique_id(host: str, mac_address: str, tracking_method: str) -> str:
@@ -290,6 +291,8 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
         self._attr_entity_registry_enabled_default = True  # Enable by default
         self._last_connection_type = "unknown"
         self._last_wireless_seen: datetime | None = None
+        self._last_seen_at: datetime | None = None
+        self._last_device_data: dict | None = None
 
     def _get_device_data(self) -> tuple[dict | None, str]:
         """Get device data from coordinator, checking both wireless and wired sources.
@@ -308,6 +311,9 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
             connection_type = device_data.get("connection_type", "wireless")
             if connection_type == "wireless" and device_data.get("connected", False):
                 self._last_wireless_seen = datetime.now()
+            if device_data.get("connected", False):
+                self._last_seen_at = datetime.now()
+                self._last_device_data = dict(device_data)
             self._last_connection_type = connection_type
             return device_data, connection_type
 
@@ -326,17 +332,35 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
                 if recently_wireless:
                     # ARP entries can linger after Wi-Fi disconnects; during a short
                     # grace window, prefer prior wireless type and mark disconnected.
-                    fallback_data = dict(device_data)
+                    fallback_data = dict(self._last_device_data or device_data)
                     fallback_data["connected"] = False
                     return fallback_data, "wireless"
 
                 connection_type = device_data.get("connection_type", "wired")
+                self._last_seen_at = datetime.now()
+                self._last_device_data = dict(device_data)
                 self._last_connection_type = connection_type
                 return device_data, connection_type
 
             # Keep previous connection type for disconnected devices to avoid
             # classifying dropped wireless clients as wired.
+            if self._last_connection_type == "wireless" and self._last_device_data is not None:
+                fallback_data = dict(self._last_device_data)
+                fallback_data["connected"] = False
+                fallback_data["offline_grace"] = True
+                return fallback_data, "wireless"
+
             return device_data, self._last_connection_type
+
+        if self._last_device_data is not None:
+            grace_data = dict(self._last_device_data)
+            grace_data["connected"] = False
+            grace_data["offline_grace"] = (
+                self._last_seen_at is not None
+                and datetime.now() - self._last_seen_at <= OFFLINE_GRACE_PERIOD
+            )
+            grace_data["stale_offline"] = not grace_data["offline_grace"]
+            return grace_data, self._last_connection_type
 
         return None, self._last_connection_type
 
@@ -423,7 +447,7 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
     @property
     def available(self) -> bool:
         """Return True if coordinator is available."""
-        return self.coordinator.last_update_success
+        return self.coordinator.last_update_success or self._last_device_data is not None
 
     @property
     def extra_state_attributes(self) -> dict[str, str]:
@@ -443,14 +467,20 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
                 "connection_type": connection_type,
                 "router": self._host,
                 "ip_address": device_data.get("ip_address", "Unknown IP"),
+                "offline": not bool(device_data.get("connected", False)),
             })
             # Only add ap_device for wireless devices
             if connection_type == "wireless":
                 attributes["ap_device"] = device_data.get("ap_device", "Unknown AP")
+            if "offline_grace" in device_data:
+                attributes["offline_grace"] = device_data.get("offline_grace", False)
+            if "stale_offline" in device_data:
+                attributes["stale_offline"] = device_data.get("stale_offline", False)
         else:
             attributes.update({
                 "last_seen": "disconnected",
                 "connection_type": connection_type,
+                "offline": True,
             })
 
         return attributes

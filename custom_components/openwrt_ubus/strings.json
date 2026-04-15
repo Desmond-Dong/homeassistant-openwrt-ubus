@@ -67,6 +67,15 @@
   "options": {
     "step": {
       "init": {
+        "title": "OpenWrt ubus",
+        "description": "Choose what you want to open for {host}",
+        "menu_options": {
+          "configure": "Configure",
+          "topology": "Open Topology",
+          "services": "Services"
+        }
+      },
+      "configure": {
         "title": "OpenWrt ubus Configuration",
         "description": "Configure sensors, timeouts and software settings for {host}",
         "data": {
@@ -90,6 +99,10 @@
           "service_timeout": "Service Status Update Interval (seconds)",
           "refresh_services": "Refresh Services List"
         }
+      },
+      "topology": {
+        "title": "Open Topology",
+        "description": "Open the topology visualization page for {host}"
       },
       "sensors": {
         "title": "Sensor Configuration",

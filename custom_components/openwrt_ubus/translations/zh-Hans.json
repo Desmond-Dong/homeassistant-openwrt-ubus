@@ -65,6 +65,15 @@
   "options": {
     "step": {
       "init": {
+        "title": "OpenWrt ubus",
+        "description": "选择你要对 {host} 执行的操作",
+        "menu_options": {
+          "configure": "配置",
+          "topology": "打开拓扑图",
+          "services": "服务"
+        }
+      },
+      "configure": {
         "title": "OpenWrt ubus 配置",
         "description": "配置 {host} 的传感器、超时时间和软件设置",
         "data": {
@@ -87,6 +96,10 @@
           "service_timeout": "服务状态更新间隔（秒）",
           "enable_wired_tracking": "启用有线设备跟踪"
         }
+      },
+      "topology": {
+        "title": "打开拓扑图",
+        "description": "打开该路由器的拓扑可视化页面"
       },
       "sensors": {
         "title": "传感器配置",
