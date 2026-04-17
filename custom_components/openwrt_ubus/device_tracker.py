@@ -166,18 +166,34 @@ async def async_setup_entry(
                 mac for mac, data in wired_stats.items() if data.get("connected", False)
             )
 
-    if device_macs:
-        _LOGGER.info("Initial scan found %d devices", len(device_macs))
-        _LOGGER.debug("Initial devices detected: %s", device_macs)
+    initial_device_macs = set(device_macs) | set(coordinator.known_devices)
 
-        new_entities = await _create_entities_for_devices(hass, entry, coordinator, device_macs)
+    if initial_device_macs:
+        _LOGGER.info(
+            "Initial tracker load includes %d devices (%d currently detected, %d restored)",
+            len(initial_device_macs),
+            len(device_macs),
+            len(initial_device_macs - device_macs),
+        )
+        _LOGGER.debug("Initial devices detected: %s", device_macs)
+        _LOGGER.debug("Initial devices restored from registry: %s", initial_device_macs - device_macs)
+
+        new_entities = await _create_entities_for_devices(
+            hass,
+            entry,
+            coordinator,
+            initial_device_macs,
+            include_known=True,
+        )
         if new_entities:
             async_add_entities(new_entities, True)
             _LOGGER.info("Created %d initial device tracker entities", len(new_entities))
         else:
             _LOGGER.info("No new entities to create (all devices already exist)")
     else:
-        _LOGGER.info("No devices found in initial scan, entities will be created dynamically as devices are discovered")
+        _LOGGER.info(
+            "No devices found in initial scan or registry, entities will be created dynamically as devices are discovered"
+        )
 
     # Register the update listener
     coordinator.async_add_listener(_handle_coordinator_update)
@@ -199,8 +215,13 @@ async def _restore_known_devices_from_registry(
                 coordinator.known_devices.add(entity_entry.unique_id.upper())
 
 
-async def _create_entities_for_devices(hass: HomeAssistant, entry: ConfigEntry,
-                                       coordinator: SharedDataUpdateCoordinator, mac_addresses: set[str]) -> list:
+async def _create_entities_for_devices(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: SharedDataUpdateCoordinator,
+    mac_addresses: set[str],
+    include_known: bool = False,
+) -> list:
     """Create device tracker entities for the given MAC addresses."""
     entity_registry = er.async_get(hass)
     new_entities = []
@@ -210,7 +231,7 @@ async def _create_entities_for_devices(hass: HomeAssistant, entry: ConfigEntry,
         mac_address = mac_address.upper()
 
         # Skip if already in known devices
-        if mac_address in coordinator.known_devices:
+        if not include_known and mac_address in coordinator.known_devices:
             _LOGGER.debug("Device %s already in known devices, skipping", mac_address)
             continue
 
@@ -253,7 +274,7 @@ async def _create_entities_for_devices(hass: HomeAssistant, entry: ConfigEntry,
                         exc,
                     )
 
-        if existing_entity_id:
+        if existing_entity_id and not include_known:
             _LOGGER.debug(
                 "Device tracker entity %s already exists with entity_id %s, adding to known devices",
                 unique_id, existing_entity_id
@@ -302,7 +323,13 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
             and connection_type is either "wireless" or "wired"
         """
         if not self.coordinator.data:
-            return None, "unknown"
+            if self._last_device_data is not None:
+                grace_data = dict(self._last_device_data)
+                grace_data["connected"] = False
+                grace_data["offline_grace"] = False
+                grace_data["stale_offline"] = True
+                return grace_data, self._last_connection_type
+            return None, self._last_connection_type
 
         # First check device_statistics (wireless devices)
         device_stats = self.coordinator.data.get("device_statistics", {})
