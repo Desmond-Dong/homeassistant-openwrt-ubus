@@ -24,6 +24,7 @@ API_SUBSYS_SESSION = "session"
 
 # Basic methods
 API_METHOD_LOGIN = "login"
+API_METHOD_DESTROY = "destroy"
 
 # Common ubus error codes
 UBUS_ERROR_SUCCESS = 0

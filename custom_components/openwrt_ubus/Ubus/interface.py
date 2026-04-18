@@ -1,5 +1,6 @@
 """Client for the OpenWrt ubus API."""
 
+import asyncio
 import json
 import logging
 
@@ -13,6 +14,7 @@ from .const import (
     API_DEF_VERIFY,
     API_ERROR,
     API_MESSAGE,
+    API_METHOD_DESTROY,
     API_METHOD_LOGIN,
     API_PARAM_PASSWORD,
     API_PARAM_USERNAME,
@@ -58,6 +60,7 @@ class Ubus:
         self.rpc_id = API_RPC_ID
         self.session_id = None
         self._session_created_internally = False
+        self._connect_lock = asyncio.Lock()
 
     def set_session(self, session):
         """Set the aiohttp session to use."""
@@ -348,42 +351,71 @@ class Ubus:
 
     async def connect(self):
         """Connect to OpenWrt ubus API."""
-        self.rpc_id = 1
-        self.session_id = API_DEF_SESSION_ID
+        async with self._connect_lock:
+            previous_session_id = self.session_id
 
-        _LOGGER.debug("Starting ubus connection to host: %s", self.host)
-        _LOGGER.debug("Authenticating with username: %s", self.username)
+            if previous_session_id and previous_session_id != API_DEF_SESSION_ID:
+                try:
+                    await self.logout()
+                except Exception as exc:
+                    _LOGGER.debug("Failed to destroy previous ubus session before reconnect: %s", exc)
 
-        login = await self.api_call(
-            API_RPC_CALL,
-            API_SUBSYS_SESSION,
-            API_METHOD_LOGIN,
-            {
-                API_PARAM_USERNAME: self.username,
-                API_PARAM_PASSWORD: self.password,
-            },
-        )
+            self.rpc_id = 1
+            self.session_id = API_DEF_SESSION_ID
 
-        _LOGGER.debug("Login response received: %s", "REDACTED" if login else "None")
+            _LOGGER.debug("Starting ubus connection to host: %s", self.host)
+            _LOGGER.debug("Authenticating with username: %s", self.username)
 
-        if login and API_UBUS_RPC_SESSION in login:
-            self.session_id = login[API_UBUS_RPC_SESSION]
-            _LOGGER.debug("Authentication successful, received session_id: %s",
-                          "VALID_SESSION" if self.session_id else "INVALID_SESSION")
-        else:
+            login = await self.api_call(
+                API_RPC_CALL,
+                API_SUBSYS_SESSION,
+                API_METHOD_LOGIN,
+                {
+                    API_PARAM_USERNAME: self.username,
+                    API_PARAM_PASSWORD: self.password,
+                },
+            )
+
+            _LOGGER.debug("Login response received: %s", "REDACTED" if login else "None")
+
+            if login and API_UBUS_RPC_SESSION in login:
+                self.session_id = login[API_UBUS_RPC_SESSION]
+                _LOGGER.debug("Authentication successful, received session_id: %s",
+                              "VALID_SESSION" if self.session_id else "INVALID_SESSION")
+            else:
+                self.session_id = None
+                _LOGGER.error("Authentication failed - login response: %s",
+                              "Empty response" if not login else f"Missing {API_UBUS_RPC_SESSION} key")
+                if login:
+                    _LOGGER.error(
+                        "Login response keys: %s", list(
+                            login.keys()) if isinstance(
+                            login, dict) else "Not a dict")
+
+            return self.session_id
+
+    async def logout(self):
+        """Destroy the current rpcd session if one exists."""
+        if not self.session_id or self.session_id == API_DEF_SESSION_ID:
+            return
+
+        try:
+            await self.api_call(
+                API_RPC_CALL,
+                API_SUBSYS_SESSION,
+                API_METHOD_DESTROY,
+                {},
+            )
+        finally:
             self.session_id = None
-            _LOGGER.error("Authentication failed - login response: %s",
-                          "Empty response" if not login else f"Missing {API_UBUS_RPC_SESSION} key")
-            if login:
-                _LOGGER.error(
-                    "Login response keys: %s", list(
-                        login.keys()) if isinstance(
-                        login, dict) else "Not a dict")
-
-        return self.session_id
 
     async def close(self):
-        """Close the aiohttp session if we created it internally."""
+        """Destroy the rpcd session and close any internally-created HTTP session."""
+        try:
+            await self.logout()
+        except Exception as exc:
+            _LOGGER.debug("Error destroying ubus session during close: %s", exc)
+
         if self.session and not self.session.closed and self._session_created_internally:
             await self.session.close()
             self.session = None

@@ -15,7 +15,7 @@ from homeassistant.components.device_tracker import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
@@ -43,6 +43,7 @@ _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(seconds=30)
 CONNECTION_TYPE_GRACE_PERIOD = timedelta(minutes=3)
+RESTORED_WIRELESS_GRACE_PERIOD = timedelta(minutes=10)
 OFFLINE_GRACE_PERIOD = timedelta(seconds=90)
 
 
@@ -106,6 +107,7 @@ async def async_setup_entry(
     coordinator.mac2name = {}  # For storing DHCP mappings
     coordinator.enable_wired = enable_wired  # Store wired tracking setting
     coordinator.tracking_method = tracking_method
+    coordinator.restored_connection_types = {}
 
     # Initialize known_devices from existing entity registry entries
     await _restore_known_devices_from_registry(hass, entry, coordinator)
@@ -203,6 +205,7 @@ async def _restore_known_devices_from_registry(
         hass: HomeAssistant, entry: ConfigEntry, coordinator: SharedDataUpdateCoordinator) -> None:
     """Restore known devices from existing entity registry entries."""
     entity_registry = er.async_get(hass)
+    device_registry = dr.async_get(hass)
     existing_entities = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
     for entity_entry in existing_entities:
         if entity_entry.domain == "device_tracker" and entity_entry.platform == DOMAIN:
@@ -210,9 +213,34 @@ async def _restore_known_devices_from_registry(
             if entity_entry.unique_id and "_" in entity_entry.unique_id:
                 mac_address = entity_entry.unique_id.rsplit("_", 1)[-1].upper()  # Normalize to uppercase
                 coordinator.known_devices.add(mac_address)
+                if entity_entry.device_id:
+                    device_entry = device_registry.async_get(entity_entry.device_id)
+                    via_device = (
+                        device_registry.async_get(device_entry.via_device_id)
+                        if device_entry and device_entry.via_device_id
+                        else None
+                    )
+                    if via_device and any(
+                        identifier[0] == DOMAIN and identifier[1].startswith(f"{entry.data[CONF_HOST]}_ap_")
+                        for identifier in via_device.identifiers
+                    ):
+                        coordinator.restored_connection_types[mac_address] = "wireless"
                 _LOGGER.debug("Restored known device from registry: %s", mac_address)
             elif entity_entry.unique_id:
-                coordinator.known_devices.add(entity_entry.unique_id.upper())
+                mac_address = entity_entry.unique_id.upper()
+                coordinator.known_devices.add(mac_address)
+                if entity_entry.device_id:
+                    device_entry = device_registry.async_get(entity_entry.device_id)
+                    via_device = (
+                        device_registry.async_get(device_entry.via_device_id)
+                        if device_entry and device_entry.via_device_id
+                        else None
+                    )
+                    if via_device and any(
+                        identifier[0] == DOMAIN and identifier[1].startswith(f"{entry.data[CONF_HOST]}_ap_")
+                        for identifier in via_device.identifiers
+                    ):
+                        coordinator.restored_connection_types[mac_address] = "wireless"
 
 
 async def _create_entities_for_devices(
@@ -285,7 +313,11 @@ async def _create_entities_for_devices(
 
         # Create device tracker entity for the new device
         try:
-            entity = OpenwrtDeviceTracker(coordinator, mac_address)
+            entity = OpenwrtDeviceTracker(
+                coordinator,
+                mac_address,
+                getattr(coordinator, "restored_connection_types", {}).get(mac_address),
+            )
             # Ensure the entity is enabled by default
             entity._attr_entity_registry_enabled_default = True
             new_entities.append(entity)
@@ -301,7 +333,12 @@ async def _create_entities_for_devices(
 class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
     """Representation of a device tracker entity."""
 
-    def __init__(self, coordinator: SharedDataUpdateCoordinator, mac_address: str) -> None:
+    def __init__(
+        self,
+        coordinator: SharedDataUpdateCoordinator,
+        mac_address: str,
+        restored_connection_type: str | None = None,
+    ) -> None:
         """Initialize the device tracker."""
         super().__init__(coordinator)
         self.mac_address = mac_address
@@ -310,7 +347,9 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
         self._attr_unique_id = _generate_unique_id(self._host, mac_address, self._tracking_method)
         self._attr_name = None  # Will be set dynamically
         self._attr_entity_registry_enabled_default = True  # Enable by default
-        self._last_connection_type = "unknown"
+        self._last_connection_type = restored_connection_type or "unknown"
+        self._restored_connection_type = restored_connection_type
+        self._restored_at: datetime | None = datetime.now() if restored_connection_type else None
         self._last_wireless_seen: datetime | None = None
         self._last_seen_at: datetime | None = None
         self._last_device_data: dict | None = None
@@ -338,6 +377,8 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
             connection_type = device_data.get("connection_type", "wireless")
             if connection_type == "wireless" and device_data.get("connected", False):
                 self._last_wireless_seen = datetime.now()
+                self._restored_connection_type = None
+                self._restored_at = None
             if device_data.get("connected", False):
                 self._last_seen_at = datetime.now()
                 self._last_device_data = dict(device_data)
@@ -354,19 +395,27 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
                 and self._last_wireless_seen is not None
                 and datetime.now() - self._last_wireless_seen <= CONNECTION_TYPE_GRACE_PERIOD
             )
+            restored_wireless = (
+                self._restored_connection_type == "wireless"
+                and self._restored_at is not None
+                and datetime.now() - self._restored_at <= RESTORED_WIRELESS_GRACE_PERIOD
+            )
 
             if is_connected:
-                if recently_wireless:
+                if recently_wireless or restored_wireless:
                     # ARP entries can linger after Wi-Fi disconnects; during a short
                     # grace window, prefer prior wireless type and mark disconnected.
                     fallback_data = dict(self._last_device_data or device_data)
                     fallback_data["connected"] = False
+                    fallback_data["offline_grace"] = True
                     return fallback_data, "wireless"
 
                 connection_type = device_data.get("connection_type", "wired")
                 self._last_seen_at = datetime.now()
                 self._last_device_data = dict(device_data)
                 self._last_connection_type = connection_type
+                self._restored_connection_type = None
+                self._restored_at = None
                 return device_data, connection_type
 
             # Keep previous connection type for disconnected devices to avoid
@@ -424,29 +473,29 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
         return self._host
 
     def _get_device_name(self) -> str:
-        """Get the device name from coordinator data or fallback to MAC."""
-        connected_router = self._host or "Unknown Router"
+        """Get the device name, preferring the client hostname or IP address."""
 
         # Get device data using unified method
         device_data, connection_type = self._get_device_data()
 
         if device_data:
-            # For wireless devices, include AP info in name
-            if connection_type == "wireless" and self.ap_device != "Unknown AP":
-                base_name = f"{connected_router}({self.ap_device})"
-            elif connection_type == "wired":
-                base_name = f"{connected_router}(Wired)"
-            else:
-                base_name = connected_router
-
             hostname = device_data.get("hostname")
-            if hostname and hostname != self.mac_address and hostname != self.mac_address.upper() and hostname != "*":
-                return f"{base_name} {hostname}"
-            else:
-                return f"{base_name} {self.mac_address.replace(':', '')}"
+            if (
+                hostname
+                and hostname != self.mac_address
+                and hostname != self.mac_address.upper()
+                and hostname != "*"
+            ):
+                return hostname
+
+            ip_address = device_data.get("ip_address")
+            if ip_address and ip_address != "Unknown IP":
+                return ip_address
+
+            return self.mac_address.replace(':', '')
 
         # Fallback to MAC address if no device data found
-        return f"{connected_router} {self.mac_address.replace(':', '')}"
+        return self.mac_address.replace(':', '')
 
     @property
     def name(self) -> str:

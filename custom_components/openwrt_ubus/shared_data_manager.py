@@ -499,7 +499,14 @@ class SharedUbusDataManager:
                                     "ip": lease.get("ip", "")
                                 }
         except Exception as exc:
-            _LOGGER.warning("Failed to get MAC to name mapping: %s", exc)
+            err_str = str(exc)
+            if "Not Found" in err_str or "Method not found" in err_str:
+                _LOGGER.debug(
+                    "DHCP MAC to name mapping is unavailable (expected on AP-only routers): %s",
+                    exc,
+                )
+            else:
+                _LOGGER.debug("Failed to get MAC to name mapping: %s", exc)
 
         return mac2name
 

@@ -52,6 +52,25 @@ from .security_utils import CredentialManager, safe_log_data
 
 _LOGGER = logging.getLogger(__name__)
 
+
+async def _check_ubus_availability(check_name: str, create_coro) -> bool:
+    """Run a lightweight availability check with a few retries."""
+    for attempt in range(1, 4):
+        try:
+            result = await create_coro()
+            available = result is not None and bool(result)
+            _LOGGER.debug("%s availability check: %s", check_name, available)
+            return available
+        except PermissionError as exc:
+            _LOGGER.debug("%s availability denied: %s", check_name, exc)
+            return False
+        except Exception as exc:
+            _LOGGER.debug("%s check failed (attempt %d/3): %s", check_name, attempt, exc)
+            if attempt < 3:
+                await asyncio.sleep(2)
+
+    return False
+
 CONFIG_SCHEMA = vol.Schema(
     {
         DOMAIN: vol.Schema(
@@ -145,14 +164,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.info("Successfully connected to OpenWrt device at %s during setup", url)
 
         # Check for modem_ctrl availability and store the result
-        modem_ctrl_available = False
-        try:
-            modem_ctrl_list = await ubus.list_modem_ctrl()
-            modem_ctrl_available = modem_ctrl_list is not None and bool(modem_ctrl_list)
-            _LOGGER.debug("Modem_ctrl availability check: %s", modem_ctrl_available)
-        except Exception as exc:
-            _LOGGER.debug("Modem_ctrl not available: %s", exc)
-            modem_ctrl_available = False
+        modem_ctrl_available = await _check_ubus_availability(
+            "Modem_ctrl", lambda: ubus.list_modem_ctrl()
+        )
 
         # Store modem_ctrl availability in hass data
         hass.data[DOMAIN]["modem_ctrl_available"] = modem_ctrl_available
@@ -195,7 +209,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             f"Failed to connect to OpenWrt device at {entry.data[CONF_HOST]}: {exc}"
         ) from exc
     finally:
-        # Ensure ubus client is always closed to prevent unclosed session warnings
+        # Ensure setup probes do not leave rpcd sessions behind.
         if ubus is not None:
             try:
                 await ubus.close()
