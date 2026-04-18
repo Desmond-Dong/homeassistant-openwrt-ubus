@@ -106,9 +106,6 @@ class OpenWrtUbusTopologyPanel extends HTMLElement {
             event,
             (item) => item.name
           );
-          if (!this._loading && !this._error) {
-            this._render();
-          }
         },
         { type: "zeroconf/subscribe_discovery" }
       );
@@ -131,9 +128,6 @@ class OpenWrtUbusTopologyPanel extends HTMLElement {
             event,
             (item) => `${item.ssdp_st || ""}|${item.ssdp_location || ""}`
           );
-          if (!this._loading && !this._error) {
-            this._render();
-          }
         },
         { type: "ssdp/subscribe_discovery" }
       );

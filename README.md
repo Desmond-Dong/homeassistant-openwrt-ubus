@@ -187,6 +187,8 @@ Open the topology page from:
 - `Settings -> Devices & Services -> OpenWrt ubus -> Configure -> Topology`
 - or `/openwrt-ubus-topology`
 
+![Topology page preview](imgs/Recording%202026-04-18%20231631.gif)
+
 The graph shows:
 
 - the router node
