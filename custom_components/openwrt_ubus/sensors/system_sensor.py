@@ -240,10 +240,12 @@ async def async_setup_entry(
         for description in SENSOR_DESCRIPTIONS
     ]
 
+    coordinator.known_temperature_sensors = set()
+
     # Add temperature sensors dynamically based on available sensors
     if coordinator.data and "system_temperatures" in coordinator.data:
         temperatures = coordinator.data["system_temperatures"]
-        for sensor_name, temp_value in temperatures.items():
+        for sensor_name in temperatures:
             temp_description = SensorEntityDescription(
                 key=f"temperature_{sensor_name}",
                 name=f"Temperature {sensor_name}",
@@ -254,6 +256,40 @@ async def async_setup_entry(
                 entity_category=None,
             )
             entities.append(SystemInfoSensor(coordinator, temp_description))
+            coordinator.known_temperature_sensors.add(sensor_name)
+
+    async def _handle_coordinator_update_async() -> None:
+        """Create newly discovered temperature sensors after startup."""
+        if not coordinator.data:
+            return
+
+        temperatures = coordinator.data.get("system_temperatures", {}) or {}
+        new_sensor_names = set(temperatures) - coordinator.known_temperature_sensors
+        if not new_sensor_names:
+            return
+
+        new_entities = []
+        for sensor_name in sorted(new_sensor_names):
+            temp_description = SensorEntityDescription(
+                key=f"temperature_{sensor_name}",
+                name=f"Temperature {sensor_name}",
+                device_class=SensorDeviceClass.TEMPERATURE,
+                state_class=SensorStateClass.MEASUREMENT,
+                native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+                icon="mdi:thermometer",
+                entity_category=None,
+            )
+            new_entities.append(SystemInfoSensor(coordinator, temp_description))
+            coordinator.known_temperature_sensors.add(sensor_name)
+
+        if new_entities:
+            async_add_entities(new_entities, True)
+
+    def _handle_coordinator_update() -> None:
+        """Schedule dynamic temperature sensor creation on refresh."""
+        hass.async_create_task(_handle_coordinator_update_async())
+
+    coordinator.async_add_listener(_handle_coordinator_update)
 
     async_add_entities(entities, True)
 

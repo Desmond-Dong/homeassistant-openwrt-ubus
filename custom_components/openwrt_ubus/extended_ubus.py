@@ -66,7 +66,11 @@ class ExtendedUbus(Ubus):
     async def get_system_temperatures(self):
         """Read system temperature sensors from /sys/class/hwmon/*/temp1_input."""
         try:
-            # First, list all hwmon directories
+            temperatures = {}
+
+            hwmon_dirs: list[str] = []
+
+            # Prefer directory listing when available.
             hwmon_list_result = await self.api_call(
                 API_RPC_CALL,
                 API_SUBSYS_FILE,
@@ -74,46 +78,50 @@ class ExtendedUbus(Ubus):
                 {"path": "/sys/class/hwmon/"},
             )
             _LOGGER.debug("hwmon list result: %s", hwmon_list_result)
-            if not hwmon_list_result or "entries" not in hwmon_list_result:
-                _LOGGER.debug("No hwmon directories found or empty entries in result")
-                return {}
+            if hwmon_list_result and "entries" in hwmon_list_result:
+                hwmon_dirs = [
+                    entry["name"]
+                    for entry in hwmon_list_result["entries"]
+                    if entry.get("type") == "directory"
+                ]
 
-            temperatures = {}
+            # Some routers expose readable hwmon files but deny file.list. Fall back
+            # to probing a reasonable range of hwmon directories directly.
+            if not hwmon_dirs:
+                hwmon_dirs = [f"hwmon{i}" for i in range(32)]
 
-            # Process each hwmon directory
-            for entry in hwmon_list_result["entries"]:
-                if entry["type"] != "directory":
-                    continue
-
-                hwmon_dir = entry["name"]
+            for hwmon_dir in hwmon_dirs:
                 hwmon_path = f"/sys/class/hwmon/{hwmon_dir}"
+                sensor_name = hwmon_dir
 
-                # Try to read the name file
                 try:
                     name_result = await self.file_read(f"{hwmon_path}/name")
                     _LOGGER.debug("Read %s/name => %s", hwmon_path, name_result)
-                    sensor_name = f"hwmon{hwmon_dir}"  # Default name based on directory
                     if name_result and "data" in name_result:
-                        sensor_name = name_result["data"].strip()
-                    elif name_result is not None:
-                        _LOGGER.debug("Name result exists but no 'data' field: %s", name_result)
-                        # If result is a list with error code, try to continue anyway
-                        if isinstance(name_result, list) and len(name_result) > 0:
-                            _LOGGER.debug("Name file read returned error code: %s, using default name", name_result)
+                        sensor_name = name_result["data"].strip() or hwmon_dir
 
-                    # Try multiple temperature inputs if available
-                    temp_path = f"{hwmon_path}/temp1_input"
-                    temp_result = await self.file_read(temp_path)
-                    _LOGGER.debug("Read %s => %s", temp_path, temp_result)
-                    _LOGGER.debug("Temp result type: %s", type(temp_result))
-                    if temp_result and "data" in temp_result:
-                        temp_value = int(temp_result["data"].strip()) / 1000.0
-                        temperatures[sensor_name] = temp_value
-                    elif temp_result is not None:
-                        _LOGGER.debug("Temp result exists but no 'data' field: %s", temp_result)
+                    sensor_found = False
+                    for temp_index in range(1, 6):
+                        temp_path = f"{hwmon_path}/temp{temp_index}_input"
+                        temp_result = await self.file_read(temp_path)
+                        _LOGGER.debug("Read %s => %s", temp_path, temp_result)
+                        if not temp_result or "data" not in temp_result:
+                            continue
+
+                        raw_value = temp_result["data"].strip()
+                        temp_value = int(raw_value) / 1000.0
+                        key = sensor_name if temp_index == 1 else f"{sensor_name}_{temp_index}"
+                        temperatures[key] = temp_value
+                        sensor_found = True
+
+                    if not sensor_found:
+                        _LOGGER.debug("No readable temp inputs found under %s", hwmon_path)
 
                 except (ValueError, TypeError) as exc:
-                    _LOGGER.debug("Error converting temperature value from %s: %s", temp_result, exc)
+                    _LOGGER.debug("Error converting temperature value in %s: %s", hwmon_path, exc)
+                    continue
+                except Exception as exc:
+                    _LOGGER.debug("Error reading temperatures from %s: %s", hwmon_path, exc)
                     continue
 
             return temperatures
