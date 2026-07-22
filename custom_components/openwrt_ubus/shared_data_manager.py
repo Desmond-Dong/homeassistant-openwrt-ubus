@@ -538,7 +538,7 @@ class SharedUbusDataManager:
                         for lease in device.get("leases", []):
                             mac = lease.get("mac", "")
                             if mac and len(mac) == 12:
-                                mac = ":".join(mac[i : i + 2] for i in range(0, len(mac), 2))
+                                mac = ":".join(mac[i:i + 2] for i in range(0, len(mac), 2))
                                 mac_upper = mac.upper()
                                 # Only add if not already in mac2name
                                 if mac_upper not in mac2name:
@@ -549,7 +549,10 @@ class SharedUbusDataManager:
         except Exception as exc:
             err_str = str(exc)
             if "Not Found" in err_str or "Method not found" in err_str:
-                _LOGGER.debug("DHCP MAC to name mapping is unavailable (expected for AP mode routers without DHCP server): %s", exc)
+                _LOGGER.debug(
+                    "DHCP MAC to name mapping is unavailable (expected for AP mode routers without DHCP server): %s",
+                    exc,
+                )
             else:
                 _LOGGER.debug("Failed to get DHCP MAC to name mapping: %s", exc)
 
@@ -626,7 +629,7 @@ class SharedUbusDataManager:
 
     async def _fetch_wired_devices(self) -> Dict[str, Any]:
         """Fetch wired device information from IP neighbor tables.
-        
+
         Returns:
             dict: Dictionary with wired_devices data
         """
@@ -654,7 +657,7 @@ class SharedUbusDataManager:
                 ),
             ),
         )
-        
+
         if not enabled:
             return {"wired_devices": {}}
 
@@ -662,7 +665,7 @@ class SharedUbusDataManager:
         try:
             # Get neighbor tables
             neighbors = await client.get_ip_neighbors()
-            
+
             # Check for permission error
             if isinstance(neighbors, dict) and neighbors.get("error") == "permission_denied":
                 _LOGGER.warning(
@@ -672,7 +675,7 @@ class SharedUbusDataManager:
                     "Wired device tracking will be disabled until permissions are granted."
                 )
                 return {"wired_devices": {}}
-            
+
             # Get configuration
             name_priority = self.entry.options.get(
                 CONF_WIRED_TRACKER_NAME_PRIORITY,
@@ -709,18 +712,18 @@ class SharedUbusDataManager:
 
             # Merge IPv4 and IPv6 neighbors by MAC address
             wired_devices = {}
-            
+
             for ip_version in ["ipv4", "ipv6"]:
                 for neighbor in neighbors.get(ip_version, []):
                     mac = neighbor.get("mac")
                     if not mac:
                         continue
-                    
+
                     # Filter out WiFi devices
                     if mac in wifi_macs:
                         _LOGGER.debug("Filtering out WiFi device: %s", mac)
                         continue
-                    
+
                     # Apply interface filtering
                     if interface_filter and not self._matches_interface(neighbor, interface_filter):
                         _LOGGER.debug(
@@ -729,12 +732,12 @@ class SharedUbusDataManager:
                             neighbor.get("interface"),
                         )
                         continue
-                    
+
                     # Apply whitelist filtering
                     if whitelist and not self._matches_whitelist(neighbor, mac, whitelist):
                         _LOGGER.debug("Device %s does not match whitelist, skipping", mac)
                         continue
-                    
+
                     # Merge or create device entry
                     if mac not in wired_devices:
                         wired_devices[mac] = {
@@ -745,13 +748,13 @@ class SharedUbusDataManager:
                             "state": neighbor.get("state"),
                             "connected": True,
                         }
-                    
+
                     # Update IP addresses
                     if ip_version == "ipv4":
                         wired_devices[mac]["ipv4"] = neighbor.get("ip")
                     else:
                         wired_devices[mac]["ipv6"] = neighbor.get("ip")
-                    
+
                     # Update state if more recent
                     if neighbor.get("state") in ["REACHABLE", "PERMANENT"]:
                         wired_devices[mac]["state"] = neighbor.get("state")
@@ -768,7 +771,7 @@ class SharedUbusDataManager:
             for mac, device in wired_devices.items():
                 hostname_data = mac2name.get(mac, {})
                 hostname_from_dhcp = hostname_data.get("hostname", "")
-                
+
                 if hostname_from_dhcp:
                     device["hostname"] = hostname_from_dhcp
                 else:
@@ -807,7 +810,14 @@ class SharedUbusDataManager:
 
             stdout = result.get("stdout", "") if isinstance(result, dict) else ""
             if not stdout:
-                return {"nlbwmon_top_hosts": {"top_hosts": [], "host_count": 0, "total_rx_bytes": 0, "total_tx_bytes": 0}}
+                return {
+                    "nlbwmon_top_hosts": {
+                        "top_hosts": [],
+                        "host_count": 0,
+                        "total_rx_bytes": 0,
+                        "total_tx_bytes": 0,
+                    }
+                }
 
             payload = json.loads(stdout)
             columns = payload.get("columns", [])
@@ -910,59 +920,57 @@ class SharedUbusDataManager:
                 }
             }
 
-
-
     def _matches_interface(self, neighbor: dict, interface_filter: list) -> bool:
         """Check if a neighbor's interface matches any interface filter entry.
-        
+
         Args:
             neighbor: Neighbor entry with interface field
             interface_filter: List of interface names (e.g., ["br-lan", "eth0"])
-            
+
         Returns:
             bool: True if matches interface filter or filter is empty
         """
         # Empty filter means no filtering
         if not interface_filter:
             return True
-        
+
         neighbor_interface = neighbor.get("interface", "")
         if not neighbor_interface:
             return False
-        
+
         # Check if interface matches any in the filter list
         return neighbor_interface in interface_filter
 
     def _matches_whitelist(self, neighbor: dict, mac: str, whitelist: list) -> bool:
         """Check if a neighbor matches any whitelist entry.
-        
+
         Args:
             neighbor: Neighbor entry with ip, mac, etc.
             mac: MAC address
             whitelist: List of prefix strings (IP or MAC prefixes)
-            
+
         Returns:
             bool: True if matches whitelist or whitelist is empty
         """
         # Empty whitelist means no filtering
         if not whitelist:
             return True
-        
+
         ip_addr = neighbor.get("ip", "")
-        
+
         for prefix in whitelist:
             prefix = prefix.strip()
             if not prefix:
                 continue
-            
+
             # Check if it matches IP address
             if ip_addr.startswith(prefix):
                 return True
-            
+
             # Check if it matches MAC address
             if mac.upper().startswith(prefix.upper()):
                 return True
-        
+
         return False
 
     async def _fetch_system_data_batch(self, system_types: set) -> Dict[str, Any]:

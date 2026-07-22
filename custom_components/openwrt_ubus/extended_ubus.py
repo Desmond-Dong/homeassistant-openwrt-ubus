@@ -140,46 +140,6 @@ class ExtendedUbus(Ubus):
             },
         )
 
-    async def file_exec(self, command, params=None):
-        """Execute a command through ubus file.exec."""
-        return await self.api_call(
-            API_RPC_CALL,
-            API_SUBSYS_FILE,
-            API_METHOD_EXEC,
-            {
-                "command": command,
-                "params": params or [],
-            },
-        )
-
-    async def get_ethers_mapping(self):
-        """Read /etc/ethers file to get MAC to hostname mapping."""
-        try:
-            # Simulate loading the eth_sensor module
-            _LOGGER.debug("Loading sensor module: eth_sensor")
-            # Simulate error accessing coordinator
-            raise KeyError(eth_sensor_id)
-        except KeyError as exc:
-            _LOGGER.error("Error accessing coordinator for eth_sensor: '%s'", eth_sensor_id)
-            _LOGGER.debug("Sensor module eth_sensor returned no coordinator")
-            return None
-
-            mapping = {}
-            for line in result["data"].splitlines():
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                parts = line.split()
-                if len(parts) >= 2:
-                    mac = parts[0].upper()
-                    hostname = parts[1]
-                    mapping[mac] = {"hostname": hostname, "ip": hostname}
-                    _LOGGER.debug("Added ethers mapping: %s -> %s", mac, hostname)
-            return mapping
-        except Exception as exc:
-            _LOGGER.debug("Error reading /etc/ethers: %s", exc)
-            return {}
-
     async def get_ethers_mapping(self):
         """Read /etc/ethers file to get MAC to hostname mapping."""
         try:

@@ -274,7 +274,7 @@ async def async_setup_entry(
 
         # Merge device_statistics and wired_devices
         all_devices = {}
-        
+
         # Add WiFi devices
         if enable_wireless_trackers and "device_statistics" in coordinator.data:
             device_stats = coordinator.data["device_statistics"]
@@ -283,14 +283,14 @@ async def async_setup_entry(
                     ip_address = device_info.get("ip", "")
                     mac_upper = mac.upper()
                     if any(
-                        mac_upper.startswith(prefix.upper()) or 
+                        mac_upper.startswith(prefix.upper()) or
                         (ip_address and ip_address.startswith(prefix))
                         for prefix in wireless_whitelist
                     ):
                         all_devices[mac] = device_info
             else:
                 all_devices.update(device_stats)
-        
+
         # Add wired devices
         if enable_wired_tracker and "wired_devices" in coordinator.data:
             wired_devices = coordinator.data["wired_devices"]
@@ -324,7 +324,7 @@ async def async_setup_entry(
     if coordinator.data:
         # Merge device_statistics and wired_devices
         all_devices = {}
-        
+
         # Add WiFi devices
         if enable_wireless_trackers and "device_statistics" in coordinator.data:
             device_stats = coordinator.data["device_statistics"]
@@ -333,14 +333,14 @@ async def async_setup_entry(
                     ip_address = device_info.get("ip", "")
                     mac_upper = mac.upper()
                     if any(
-                        mac_upper.startswith(prefix.upper()) or 
+                        mac_upper.startswith(prefix.upper()) or
                         (ip_address and ip_address.startswith(prefix))
                         for prefix in wireless_whitelist
                     ):
                         all_devices[mac] = device_info
             else:
                 all_devices.update(device_stats)
-        
+
         # Add wired devices
         if enable_wired_tracker and "wired_devices" in coordinator.data:
             wired_devices = coordinator.data["wired_devices"]
@@ -361,7 +361,8 @@ async def async_setup_entry(
             _LOGGER.info("No new entities to create (all devices already exist)")
     else:
         _LOGGER.info(
-            "No devices found in initial scan or registry, entities will be created dynamically as devices are discovered"
+            "No devices found in initial scan or registry, "
+            "entities will be created dynamically as devices are discovered"
         )
 
     # Register the update listener
@@ -791,7 +792,7 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
             if "ap_device" not in device_data:
                 # If no ap_device, it's likely a wired device
                 connection_type = "wired"
-            
+
             attributes.update(
                 {
                     "name": self._get_device_name(),
@@ -801,7 +802,7 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
                     "ip_address": device_data.get("ip_address", "Unknown IP"),
                 }
             )
-            
+
             # Add wireless-specific attributes
             if connection_type == "wireless":
                 attributes["ap_device"] = device_data.get("ap_device", "Unknown AP")
@@ -835,7 +836,7 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
         device_data = device_stats.get(self._attr_mac_address) or device_stats.get(self._attr_mac_address.upper())
         if device_data:
             return device_data
-        
+
         # Try wired devices
         wired_devices = self.coordinator.data.get("wired_devices", {})
         wired_data = wired_devices.get(self._attr_mac_address) or wired_devices.get(self._attr_mac_address.upper())

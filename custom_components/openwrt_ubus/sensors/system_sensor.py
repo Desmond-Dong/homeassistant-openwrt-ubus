@@ -23,18 +23,15 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from ..const import (
     DOMAIN,
     CONF_USE_HTTPS,
     CONF_PORT,
-    CONF_ENDPOINT,
     DEFAULT_USE_HTTPS,
-    DEFAULT_ENDPOINT,
     CONF_SYSTEM_SENSOR_TIMEOUT,
     DEFAULT_SYSTEM_SENSOR_TIMEOUT,
-    build_ubus_url,
     build_configuration_url,
 )
 from ..shared_data_manager import SharedDataUpdateCoordinator
@@ -237,6 +234,9 @@ async def async_setup_entry(
         scan_interval,
     )
 
+    # Track known temperature sensors so we can dynamically discover new ones
+    known_temperature_sensors: set[str] = set()
+
     # Fetch initial data
     await coordinator.async_config_entry_first_refresh()
 
@@ -263,15 +263,16 @@ async def async_setup_entry(
                 entity_category=None,
             )
             entities.append(SystemInfoSensor(coordinator, temp_description))
-            coordinator.known_temperature_sensors.add(sensor_name)
+            known_temperature_sensors.add(sensor_name)
 
     async def _handle_coordinator_update_async() -> None:
         """Create newly discovered temperature sensors after startup."""
+        nonlocal known_temperature_sensors
         if not coordinator.data:
             return
 
         temperatures = coordinator.data.get("system_temperatures", {}) or {}
-        new_sensor_names = set(temperatures) - coordinator.known_temperature_sensors
+        new_sensor_names = set(temperatures) - known_temperature_sensors
         if not new_sensor_names:
             return
 
@@ -287,7 +288,7 @@ async def async_setup_entry(
                 entity_category=None,
             )
             new_entities.append(SystemInfoSensor(coordinator, temp_description))
-            coordinator.known_temperature_sensors.add(sensor_name)
+            known_temperature_sensors.add(sensor_name)
 
         if new_entities:
             async_add_entities(new_entities, True)
@@ -301,25 +302,6 @@ async def async_setup_entry(
     async_add_entities(entities, True)
 
     return coordinator
-
-
-class SystemInfoCoordinator(DataUpdateCoordinator):
-    """Class to manage fetching system information from the router."""
-
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        """Initialize."""
-        self.entry = entry
-        self.host = entry.data[CONF_HOST]
-        self.username = entry.data[CONF_USERNAME]
-        self.password = entry.data[CONF_PASSWORD]
-
-        # Get Home Assistant's HTTP client session
-        session = async_get_clientsession(hass)
-
-        use_https = entry.data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS)
-        port = entry.data.get(CONF_PORT)
-        endpoint = entry.data.get(CONF_ENDPOINT, DEFAULT_ENDPOINT)
-        self.url = build_ubus_url(self.host, use_https, port=port, endpoint=endpoint)
 
 
 class SystemInfoSensor(CoordinatorEntity, SensorEntity):

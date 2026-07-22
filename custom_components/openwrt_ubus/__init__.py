@@ -171,11 +171,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     if "Access denied" in err_str or type(exc).__name__ in ("PermissionError",):
                         _LOGGER.debug("%s check failed (Permission Denied): %s", check_name, exc)
                         return False
-                    
+
                     _LOGGER.debug("%s check failed (attempt %d/3): %s", check_name, attempt, exc)
                     if attempt < 3:
                         await asyncio.sleep(2)
-            
+
             return False
 
         # Check for modem_ctrl availability and store the result
@@ -509,7 +509,7 @@ async def _cleanup_disabled_sensor_devices(hass: HomeAssistant, entry: ConfigEnt
                                 and identifier[1] != f"{host}_mwan3"
                                 and identifier[1] != f"{host}_ap"
                             ):
-                                # This is a STA device (not the main router, QModem, AP device, network interface or MWAN device)
+                                # This is a STA device (not the main router, QModem, AP, or network device)
                                 _LOGGER.info(
                                     "Removing STA device %s (STA sensors disabled)",
                                     identifier[1],

@@ -101,6 +101,14 @@
   "options": {
     "step": {
       "init": {
+        "title": "OpenWrt ubus",
+        "description": "Select an action for {host}\n\nTip: Find the **OpenWrt Topology** panel in the sidebar.",
+        "menu_options": {
+          "configure": "Configure",
+          "services": "Services"
+        }
+      },
+      "configure": {
         "title": "Configure OpenWrt ubus Integration",
         "description": "Configure sensor types, timeouts, and other options for your OpenWrt device",
         "data": {

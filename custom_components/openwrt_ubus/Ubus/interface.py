@@ -28,10 +28,8 @@ from .const import (
     API_SESSION_METHOD_LIST,
     HTTP_STATUS_OK,
     UBUS_ERROR_SUCCESS,
-    API_UBUS_RPC_SESSION_EXPIRES,
     _get_error_message,
     API_SESSION_METHOD_DESTROY,
-    API_SESSION_METHOD_LIST,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -215,7 +213,7 @@ class Ubus:
 
                     # Special handling for permission errors
                     if error_code == -32002 or "Access denied" in error_message:
-                        _LOGGER.warning(
+                        _LOGGER.debug(
                             "Permission denied when calling %s.%s: %s (code: %d) [session_id: %s]",
                             subsystem,
                             method,
@@ -282,7 +280,7 @@ class Ubus:
                     try:
                         raise session_response
                     except (RPCError, PermissionError) as e:
-                        _LOGGER.warning("Failed to retrieve session expiration: %s [session_id: %s]", e, self.session_id)
+                        _LOGGER.debug("Failed to retrieve session expiration: %s [session_id: %s]", e, self.session_id)
                 elif isinstance(session_response, list):
                     raise ConnectionError(f"Unexpected session API response format: {session_response}")
                 elif isinstance(session_response, dict):
