@@ -36,6 +36,8 @@ from .const import (
     API_METHOD_REBOOT,
     API_METHOD_SET,
     API_METHOD_COMMIT,
+    DEFAULT_BAN_TIME_MS,
+    DEFAULT_DEAUTH_REASON,
 )
 
 _LOGGER = logging.getLogger(__name__)
