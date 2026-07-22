@@ -27,8 +27,15 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from ..const import (
     DOMAIN,
+    CONF_USE_HTTPS,
+    CONF_PORT,
+    CONF_ENDPOINT,
+    DEFAULT_USE_HTTPS,
+    DEFAULT_ENDPOINT,
     CONF_SYSTEM_SENSOR_TIMEOUT,
     DEFAULT_SYSTEM_SENSOR_TIMEOUT,
+    build_ubus_url,
+    build_configuration_url,
 )
 from ..shared_data_manager import SharedDataUpdateCoordinator
 
@@ -59,7 +66,6 @@ SENSOR_DESCRIPTIONS = [
         key="load_1",
         name="Load Average (1m)",
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement="%",
         icon="mdi:speedometer",
         entity_category=None,
     ),
@@ -67,7 +73,6 @@ SENSOR_DESCRIPTIONS = [
         key="load_5",
         name="Load Average (5m)",
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement="%",
         icon="mdi:speedometer",
         entity_category=None,
     ),
@@ -75,7 +80,6 @@ SENSOR_DESCRIPTIONS = [
         key="load_15",
         name="Load Average (15m)",
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement="%",
         icon="mdi:speedometer",
         entity_category=None,
     ),
@@ -213,7 +217,7 @@ async def async_setup_entry(
     # Get timeout from configuration (priority: options > data > default)
     timeout = entry.options.get(
         CONF_SYSTEM_SENSOR_TIMEOUT,
-        entry.data.get(CONF_SYSTEM_SENSOR_TIMEOUT, DEFAULT_SYSTEM_SENSOR_TIMEOUT)
+        entry.data.get(CONF_SYSTEM_SENSOR_TIMEOUT, DEFAULT_SYSTEM_SENSOR_TIMEOUT),
     )
     scan_interval = timedelta(seconds=timeout)
 
@@ -221,13 +225,14 @@ async def async_setup_entry(
     coordinator = SharedDataUpdateCoordinator(
         hass,
         data_manager,
-        ["system_info",
-         "system_stat",
-         "system_board",
-         "conntrack_count",
-         "system_temperatures",
-         "dhcp_clients_count"],
-        # Data types this coordinator needs
+        [
+            "system_info",
+            "system_stat",
+            "system_board",
+            "conntrack_count",
+            "system_temperatures",
+            "dhcp_clients_count",
+        ],  # Data types this coordinator needs
         f"{DOMAIN}_system_{entry.data[CONF_HOST]}",
         scan_interval,
     )
@@ -235,20 +240,22 @@ async def async_setup_entry(
     # Fetch initial data
     await coordinator.async_config_entry_first_refresh()
 
-    entities = [
-        SystemInfoSensor(coordinator, description)
-        for description in SENSOR_DESCRIPTIONS
-    ]
-
-    coordinator.known_temperature_sensors = set()
+    entities = [SystemInfoSensor(coordinator, description) for description in SENSOR_DESCRIPTIONS]
 
     # Add temperature sensors dynamically based on available sensors
     if coordinator.data and "system_temperatures" in coordinator.data:
         temperatures = coordinator.data["system_temperatures"]
-        for sensor_name in temperatures:
+        for sensor_name, temp_value in temperatures.items():
+            # Normalize key to snake_case: kernel names may contain hyphens
+            # (e.g. "cpu-thermal-0") which would break the integration's
+            # snake_case-only convention for keys and unique_ids.
+            normalized_key = sensor_name.replace("-", "_")
+            # Normalize display name to Title Case to match existing sensors
+            # ("CPU Usage", "Free Memory", etc.). Underscores → spaces first.
+            normalized_name = sensor_name.replace("_", " ").replace("-", " ").title()
             temp_description = SensorEntityDescription(
-                key=f"temperature_{sensor_name}",
-                name=f"Temperature {sensor_name}",
+                key=f"temperature_{normalized_key}",
+                name=f"Temperature {normalized_name}",
                 device_class=SensorDeviceClass.TEMPERATURE,
                 state_class=SensorStateClass.MEASUREMENT,
                 native_unit_of_measurement=UnitOfTemperature.CELSIUS,
@@ -296,8 +303,32 @@ async def async_setup_entry(
     return coordinator
 
 
+class SystemInfoCoordinator(DataUpdateCoordinator):
+    """Class to manage fetching system information from the router."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        """Initialize."""
+        self.entry = entry
+        self.host = entry.data[CONF_HOST]
+        self.username = entry.data[CONF_USERNAME]
+        self.password = entry.data[CONF_PASSWORD]
+
+        # Get Home Assistant's HTTP client session
+        session = async_get_clientsession(hass)
+
+        use_https = entry.data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS)
+        port = entry.data.get(CONF_PORT)
+        endpoint = entry.data.get(CONF_ENDPOINT, DEFAULT_ENDPOINT)
+        self.url = build_ubus_url(self.host, use_https, port=port, endpoint=endpoint)
+
+
 class SystemInfoSensor(CoordinatorEntity, SensorEntity):
     """Representation of a system information sensor."""
+
+    # raw_data carries the full coordinator dump and changes every poll
+    # (uptime, /proc/stat). Keep it live for debugging but never record it,
+    # otherwise it forces a new state row + unique attribute blob every update.
+    _unrecorded_attributes = frozenset({"raw_data"})
 
     def __init__(
         self,
@@ -317,10 +348,12 @@ class SystemInfoSensor(CoordinatorEntity, SensorEntity):
     def device_info(self) -> DeviceInfo:
         """Return device info for the router."""
         # Try to get board info from coordinator data
-        board_model = self.coordinator.data.get("system_board", {}).get(
-            "model", "Router") if self.coordinator.data else "Router"
-        board_hostname = self.coordinator.data.get("system_board", {}).get(
-            "hostname") if self.coordinator.data else None
+        board_model = (
+            self.coordinator.data.get("system_board", {}).get("model", "Router") if self.coordinator.data else "Router"
+        )
+        board_hostname = (
+            self.coordinator.data.get("system_board", {}).get("hostname") if self.coordinator.data else None
+        )
         board_system = self.coordinator.data.get("system_board", {}).get("system") if self.coordinator.data else None
 
         # Use hostname for name if available, otherwise use host
@@ -331,7 +364,11 @@ class SystemInfoSensor(CoordinatorEntity, SensorEntity):
             name=device_name,
             manufacturer="OpenWrt",
             model=board_model,
-            configuration_url=f"http://{self._host}",
+            configuration_url=build_configuration_url(
+                self._host,
+                self.coordinator.data_manager.entry.data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS),
+                self.coordinator.data_manager.entry.data.get(CONF_PORT),
+            ),
             sw_version=board_system,  # Use system info as software version
         )
 
@@ -358,10 +395,13 @@ class SystemInfoSensor(CoordinatorEntity, SensorEntity):
             load = system_info.get("load", [])
             if isinstance(load, list) and len(load) >= 3:
                 load_map = {"load_1": 0, "load_5": 1, "load_15": 2}
-                return load[load_map[key]] / 1000 if key in load_map else None
+                return round(load[load_map[key]] / 65536.0, 2) if key in load_map else None
         elif key == "cpu_usage":
             system_stat = self.coordinator.data.get("system_stat", {}).get("data", "")
-            cpu_data = next((line for line in system_stat.splitlines() if line.startswith("cpu ")), "").split()[1:]
+            cpu_data = next(
+                (line for line in system_stat.splitlines() if line.startswith("cpu ")),
+                "",
+            ).split()[1:]
             cpu_data = [int(value) for value in cpu_data]
             if len(cpu_data) < 10:
                 return None
@@ -372,7 +412,7 @@ class SystemInfoSensor(CoordinatorEntity, SensorEntity):
             else:
                 cpu_idle_delta = cpu_idle - self.cpu_idle
                 cpu_total_delta = cpu_total - self.cpu_total
-                cpu_usage = round((1. - cpu_idle_delta / cpu_total_delta) * 100) if cpu_total_delta > 0 else None
+                cpu_usage = round((1.0 - cpu_idle_delta / cpu_total_delta) * 100) if cpu_total_delta > 0 else None
             self.cpu_total = cpu_total
             self.cpu_idle = cpu_idle
             return cpu_usage
@@ -395,9 +435,9 @@ class SystemInfoSensor(CoordinatorEntity, SensorEntity):
         elif key.startswith("swap_"):
             swap = system_info.get("swap", {})
             if key == "swap_total":
-                return round(swap.get("total", 0) / (1024 * 1024), 1) if swap.get("total") else None
+                return round(swap.get("total", 0) / (1024 * 1024), 1) if "total" in swap else None
             elif key == "swap_free":
-                return round(swap.get("free", 0) / (1024 * 1024), 1) if swap.get("free") else None
+                return round(swap.get("free", 0) / (1024 * 1024), 1) if "free" in swap else None
         elif key.startswith("board_"):
             board_key = key.replace("board_", "")
             return board_info.get(board_key)

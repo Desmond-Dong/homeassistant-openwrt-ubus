@@ -6,6 +6,11 @@
         "description": "Set up connection to OpenWrt device using ubus for wireless device tracking and system monitoring",
         "data": {
           "host": "Host",
+          "ip_address": "IP Address",
+          "use_https": "Use HTTPS",
+          "port": "Port",
+          "verify_ssl": "Verify SSL Certificate",
+          "endpoint": "Ubus Endpoint",
           "username": "Username",
           "password": "Password",
           "use_https": "Use HTTPS",
@@ -15,7 +20,8 @@
           "endpoint": "API Endpoint",
           "tracking_method": "Tracking Method",
           "wireless_software": "Wireless Software",
-          "dhcp_software": "DHCP Software"
+          "dhcp_software": "DHCP Software",
+          "tracking_method": "Tracking Method"
         }
       },
       "sensors": {
@@ -24,42 +30,39 @@
         "data": {
           "enable_system_sensors": "Enable System Sensors",
           "enable_qmodem_sensors": "Enable QModem Sensors",
-          "enable_sta_sensors": "Enable Station (WiFi Device) Sensors",
+          "enable_sta_sensors": "Enable Station (WiFi Device) Sensors (requires iwinfo)",
           "enable_ap_sensors": "Enable Access Point Sensors",
           "enable_eth_sensors": "Enable Network Interface Sensors",
-          "enable_mwan3_sensors": "Enable MWAN3 Sensors",
           "enable_nlbwmon_sensors": "Enable NLBWMon Top Hosts Sensor",
           "enable_service_controls": "Enable Service Controls",
           "enable_device_kick_buttons": "Enable Device Kick Buttons (requires hostapd)",
           "enable_reboot_button": "Enable Reboot Button",
-          "enable_wireless_trackers": "Enable Wireless Device Trackers",
-          "enable_wired_tracker": "Enable Wired Device Tracker",
-          "enable_wired_tracking": "Enable Wired Device Tracking (legacy)",
-          "tracking_method": "Tracking Method"
-        }
-      },
-      "sta_sensors_config": {
-        "title": "OpenWrt ubus - WiFi Device Selection",
-        "description": "Select which WiFi devices to create sensors for on {host}",
-        "data": {
-          "select_all_sta": "Create sensors for all connected devices",
-          "selected_sta": "Select specific devices"
+          "enable_wireless_trackers": "Enable Wireless Device Tracking",
+          "enable_wired_tracker": "Enable Wired Device Tracking"
         }
       },
       "wireless_tracker_config": {
-        "title": "OpenWrt ubus - Wireless Tracker Configuration",
-        "description": "Configure wireless device tracker settings for {host}",
+        "title": "OpenWrt ubus - Wireless Device Tracker Configuration",
+        "description": "Configure wireless device tracking filters for {host}. Leave the whitelist empty to track all connected WiFi devices.",
         "data": {
-          "wireless_tracker_whitelist": "MAC Prefix Whitelist (comma-separated)"
+          "wireless_tracker_whitelist": "Whitelist (comma-separated IP/MAC prefixes)"
+        }
+      },
+      "sta_sensors_config": {
+        "title": "OpenWrt ubus - Station Sensor Device Selection",
+        "description": "Select which WiFi devices should have sensor entities created. Note: This list only shows devices visible via iwinfo. If the list is empty, ensure iwinfo is installed and at least one device is connected.\n\nHost: {host}",
+        "data": {
+          "select_all_sta": "Track all connected stations (no filter)",
+          "selected_sta": "Devices to Track"
         }
       },
       "wired_tracker_config": {
-        "title": "OpenWrt ubus - Wired Tracker Configuration",
-        "description": "Configure wired device tracker settings for {host}",
+        "title": "OpenWrt ubus - Wired Device Tracker Configuration",
+        "description": "Configure wired device tracking filters for {host}. WARNING: Without filters, many confusing device tracker entities may be created!",
         "data": {
-          "wired_tracker_name_priority": "Name Priority",
-          "wired_tracker_whitelist": "IP/MAC Prefix Whitelist (comma-separated)",
-          "wired_tracker_interfaces": "Interface Filter (comma-separated)"
+          "wired_tracker_name_priority": "Device Name Priority",
+          "wired_tracker_whitelist": "Whitelist (comma-separated IP/MAC prefixes)",
+          "wired_tracker_interfaces": "Interface Filter (comma-separated interface names)"
         }
       },
       "services": {
@@ -76,10 +79,8 @@
           "system_sensor_timeout": "System Sensor Update Interval (seconds)",
           "qmodem_sensor_timeout": "QModem Sensor Update Interval (seconds)",
           "sta_sensor_timeout": "Station Sensor Update Interval (seconds)",
-          "ap_sensor_timeout": "AP Sensor Update Interval (seconds)",
-          "mwan3_sensor_timeout": "MWAN3 Sensor Update Interval (seconds)",
-          "service_timeout": "Service Status Update Interval (seconds)",
-          "consider_home": "Consider Home Delay (seconds)"
+          "ap_sensor_timeout": "Access Point Sensor Update Interval (seconds)",
+          "service_timeout": "Service Status Update Interval (seconds)"
         }
       }
     },
@@ -100,74 +101,74 @@
   "options": {
     "step": {
       "init": {
-        "title": "OpenWrt ubus",
-        "description": "Choose what you want to open for {host}",
-        "menu_options": {
-          "configure": "Configure",
-          "topology": "Open Topology",
-          "services": "Services"
-        }
-      },
-      "configure": {
-        "title": "OpenWrt ubus Configuration",
-        "description": "Configure sensors, timeouts and software settings for {host}",
+        "title": "Configure OpenWrt ubus Integration",
+        "description": "Configure sensor types, timeouts, and other options for your OpenWrt device",
         "data": {
           "use_https": "Use HTTPS",
           "port": "Port",
           "verify_ssl": "Verify SSL Certificate",
-          "endpoint": "API Endpoint",
+          "endpoint": "Ubus Endpoint",
           "wireless_software": "Wireless Software",
           "dhcp_software": "DHCP Software",
           "tracking_method": "Tracking Method",
           "enable_system_sensors": "Enable System Sensors",
           "enable_qmodem_sensors": "Enable QModem Sensors",
-          "enable_sta_sensors": "Enable Station (WiFi Device) Sensors",
+          "enable_sta_sensors": "Enable Station (WiFi Device) Sensors (requires iwinfo)",
+          "select_all_sta": "Track all connected stations (no filter)",
           "enable_ap_sensors": "Enable Access Point Sensors",
           "enable_eth_sensors": "Enable Network Interface Sensors",
-          "enable_mwan3_sensors": "Enable MWAN3 Sensors",
           "enable_nlbwmon_sensors": "Enable NLBWMon Top Hosts Sensor",
           "enable_service_controls": "Enable Service Controls",
           "enable_device_kick_buttons": "Enable Device Kick Buttons",
           "enable_reboot_button": "Enable Reboot Button",
-          "enable_wireless_trackers": "Enable Wireless Device Trackers",
-          "wireless_tracker_whitelist": "Wireless Tracker MAC Prefix Whitelist",
-          "enable_wired_tracker": "Enable Wired Device Tracker",
-          "wired_tracker_name_priority": "Wired Tracker Name Priority",
-          "wired_tracker_whitelist": "Wired Tracker IP/MAC Prefix Whitelist",
-          "wired_tracker_interfaces": "Wired Tracker Interface Filter",
-          "enable_wired_tracking": "Enable Wired Device Tracking (legacy)",
+          "enable_wireless_trackers": "Enable Wireless Device Tracking",
+          "wireless_tracker_whitelist": "Wireless Device Whitelist",
+          "enable_wired_tracker": "Enable Wired Device Tracking",
+          "wired_tracker_name_priority": "Wired Device Name Priority",
+          "wired_tracker_whitelist": "Wired Device Whitelist",
+          "wired_tracker_interfaces": "Wired Device Interface Filter",
+          "selected_services": "Services to Control",
+          "refresh_services": "Refresh Services List",
           "system_sensor_timeout": "System Sensor Update Interval (seconds)",
           "qmodem_sensor_timeout": "QModem Sensor Update Interval (seconds)",
           "sta_sensor_timeout": "Station Sensor Update Interval (seconds)",
-          "ap_sensor_timeout": "AP Sensor Update Interval (seconds)",
-          "mwan3_sensor_timeout": "MWAN3 Sensor Update Interval (seconds)",
-          "service_timeout": "Service Status Update Interval (seconds)",
-          "consider_home": "Consider Home Delay (seconds)",
-          "refresh_services": "Refresh Services List"
+          "ap_sensor_timeout": "Access Point Sensor Update Interval (seconds)",
+          "tracking_method": "Tracking Method",
+          "consider_home": "Consider Home Delay (seconds)"
+        },
+        "data_description": {
+          "use_https": "Whether to use HTTPS (SSL/TLS) when connecting to the router",
+          "port": "Custom port number (leave empty for default: HTTP=80, HTTPS=443)",
+          "verify_ssl": "Whether to verify the SSL certificate when connecting to the router",
+          "endpoint": "Custom ubus endpoint path (default: ubus). Change this if your router uses a reverse proxy or custom path",
+          "wireless_software": "Software used to get wireless information (iwinfo or hostapd)",
+          "dhcp_software": "Software used to get DHCP lease information",
+          "enable_system_sensors": "Monitor router system information (uptime, memory, load)",
+          "enable_qmodem_sensors": "Monitor cellular modem information (if available)",
+          "enable_sta_sensors": "Monitor connected WiFi devices and their statistics (requires iwinfo)",
+          "select_all_sta": "When enabled, sensors will be created for ALL connected devices without filtering",
+          "enable_ap_sensors": "Monitor access point interface information (WiFi network details)",
+          "enable_eth_sensors": "Monitor network interface statistics",
+          "enable_nlbwmon_sensors": "Monitor top bandwidth-consuming hosts using nlbwmon (requires /usr/sbin/nlbw and ubus file.exec permission)",
+          "enable_device_kick_buttons": "Enable buttons to disconnect devices from Access Points (requires hostapd)",
+          "enable_wired_tracker": "Track wired devices using IP neighbor tables (filters out WiFi devices)",
+          "wired_tracker_name_priority": "When hostname is not found, use IPv4, IPv6, or MAC address as device name",
+          "wired_tracker_whitelist": "Comma-separated list of IP or MAC prefixes to track (e.g., 192.168.1,fe80,AA:BB:CC). Leave empty to track all non-WiFi devices",
+          "wired_tracker_interfaces": "Comma-separated list of network interfaces to track (e.g., br-lan,eth0). Leave empty to track all interfaces. Useful to filter out unwanted devices",
+          "system_sensor_timeout": "How often to update system sensor data (10-300 seconds)",
+          "qmodem_sensor_timeout": "How often to update modem sensor data (30-600 seconds)",
+          "sta_sensor_timeout": "How often to update station device data (10-300 seconds)",
+          "ap_sensor_timeout": "How often to update access point data (30-600 seconds)",
+          "tracking_method": "Tracking method for devices: 'uniqueid' uses MAC address only (device roams between APs), 'combined' uses AP+MAC (separate entities per AP)",
+          "consider_home": "Time in seconds to keep a device as 'home' after it was last seen (0-1800). Set to 0 to disable. Useful for devices that temporarily disconnect during WiFi roaming"
         }
       },
-      "topology": {
-        "title": "Open Topology",
-        "description": "Open the topology visualization page for {host}"
-      },
-      "sensors": {
-        "title": "Sensor Configuration",
-        "description": "Configure sensor types and software settings for {host}",
+      "sta_sensors_config": {
+        "title": "OpenWrt ubus - Station Sensor Device Selection",
+        "description": "Select which WiFi devices should have sensor entities created. Note: This list only shows devices visible via iwinfo. If the list is empty, ensure iwinfo is installed and at least one device is connected.\n\nHost: {host}",
         "data": {
-          "enable_system_sensors": "Enable System Sensors",
-          "enable_qmodem_sensors": "Enable QModem Sensors",
-          "enable_sta_sensors": "Enable Station (WiFi Device) Sensors",
-          "wireless_software": "Wireless Software",
-          "dhcp_software": "DHCP Software"
-        }
-      },
-      "timeouts": {
-        "title": "Timeout Configuration",
-        "description": "Configure update intervals for sensors on {host}",
-        "data": {
-          "system_sensor_timeout": "System Sensor Update Interval (seconds)",
-          "qmodem_sensor_timeout": "QModem Sensor Update Interval (seconds)",
-          "sta_sensor_timeout": "Station Sensor Update Interval (seconds)"
+          "select_all_sta": "Track all connected stations (no filter)",
+          "selected_sta": "Devices to Track"
         }
       }
     }
@@ -305,6 +306,39 @@
       },
       "tx_bytes": {
         "name": "TX Data"
+      },
+      "ssid": {
+        "name": "SSID"
+      },
+      "bssid": {
+        "name": "BSSID"
+      },
+      "channel": {
+        "name": "Channel"
+      },
+      "frequency": {
+        "name": "Frequency"
+      },
+      "txpower": {
+        "name": "TX Power"
+      },
+      "quality": {
+        "name": "Signal Quality"
+      },
+      "bitrate": {
+        "name": "Bitrate"
+      },
+      "mode": {
+        "name": "Mode"
+      },
+      "hwmode": {
+        "name": "Hardware Mode"
+      },
+      "htmode": {
+        "name": "HT Mode"
+      },
+      "country": {
+        "name": "Country"
       }
     },
     "switch": {

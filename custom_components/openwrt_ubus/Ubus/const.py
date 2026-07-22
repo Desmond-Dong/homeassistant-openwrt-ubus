@@ -24,8 +24,8 @@ API_PARAM_USERNAME = "username"
 API_SUBSYS_SESSION = "session"
 
 # Basic methods
-API_METHOD_LOGIN = "login"
-API_METHOD_DESTROY = "destroy"
+API_SESSION_METHOD_LOGIN = "login"
+API_SESSION_METHOD_DESTROY = "destroy"
 API_SESSION_METHOD_LIST = "list"
 
 # Common ubus error codes

@@ -17,18 +17,28 @@ from ..const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up the system reboot button entity from a config entry."""
     data_manager_key = f"data_manager_{entry.entry_id}"
     data_manager = hass.data[DOMAIN][data_manager_key]
+
     async_add_entities([OpenwrtRebootButton(data_manager, entry)], True)
+    _LOGGER.debug("Created reboot button entity for %s", entry.data[CONF_HOST])
 
 
 class OpenwrtRebootButton(ButtonEntity):
+    """Representation of an OpenWrt system reboot button."""
+
     _attr_device_class = ButtonDeviceClass.RESTART
     _attr_icon = "mdi:restart"
     _attr_entity_registry_enabled_default = True
 
-    def __init__(self, data_manager, entry):
+    def __init__(self, data_manager, entry: ConfigEntry) -> None:
+        """Initialize the button."""
         self._data_manager = data_manager
         self._host = entry.data[CONF_HOST]
         self._attr_unique_id = f"{self._host}_system_reboot"
@@ -36,6 +46,7 @@ class OpenwrtRebootButton(ButtonEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
+        """Return device info."""
         return DeviceInfo(
             identifiers={(DOMAIN, self._host)},
             name=f"OpenWrt Router ({self._host})",
@@ -45,9 +56,14 @@ class OpenwrtRebootButton(ButtonEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return {"host": self._host, "action": "reboot"}
+        """Return the state attributes."""
+        return {
+            "host": self._host,
+            "action": "reboot",
+        }
 
     async def async_press(self) -> None:
+        """Trigger a system reboot."""
         try:
             ubus = await self._data_manager.get_ubus_connection_async()
             await ubus.system_reboot()

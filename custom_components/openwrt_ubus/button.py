@@ -27,13 +27,19 @@ BUTTON_MODULES = [
         "module": service_button,
         "config_key": CONF_ENABLE_SERVICE_CONTROLS,
         "default": DEFAULT_ENABLE_SERVICE_CONTROLS,
-        "name": "service_button"
+        "name": "service_button",
     },
     {
         "module": device_kick_button,
         "config_key": CONF_ENABLE_DEVICE_KICK_BUTTONS,
         "default": DEFAULT_ENABLE_DEVICE_KICK_BUTTONS,
-        "name": "device_kick_button"
+        "name": "device_kick_button",
+    },
+    {
+        "module": reboot_button,
+        "config_key": CONF_ENABLE_REBOOT_BUTTON,
+        "default": DEFAULT_ENABLE_REBOOT_BUTTON,
+        "name": "reboot_button",
     },
     {
         "module": reboot_button,
@@ -63,10 +69,7 @@ async def async_setup_entry(
 
         # Check if this button type is enabled
         # Priority: options > data > default
-        enabled = entry.options.get(
-            config_key,
-            entry.data.get(config_key, default_enabled)
-        )
+        enabled = entry.options.get(config_key, entry.data.get(config_key, default_enabled))
 
         if not enabled:
             _LOGGER.info("Button module %s is disabled in configuration", module_name)
@@ -74,7 +77,7 @@ async def async_setup_entry(
 
         try:
             # Check if module has async_setup_entry function
-            if hasattr(module, 'async_setup_entry'):
+            if hasattr(module, "async_setup_entry"):
                 _LOGGER.debug("Loading button module: %s", module_name)
 
                 # For device_kick_button, we need to pass the add_entities callback

@@ -6,94 +6,92 @@ scan_devices:
   target:
     entity:
       integration: openwrt_ubus
-
 uci_get:
-  name: UCI Get
-  description: Read a UCI configuration option from the OpenWrt router
+  name: UCI get
+  description: Read a UCI value via ubus on the OpenWrt router and optionally write it to a sensor
   fields:
     config:
       name: Config
-      description: UCI config name (e.g. firewall, wireless, dhcp)
-      required: true
+      description: UCI config name (e.g. firewall)
       example: firewall
+      required: true
       selector:
         text:
     section:
       name: Section
-      description: Section name or type/index (e.g. block_user or @rule[3])
+      description: Section name or type/index (e.g. block_user_7085c2 or @rule[3])
+      example: block_user_7085c2
       required: false
-      example: block_user
       selector:
         text:
     option:
       name: Option
-      description: Option key to retrieve (e.g. enabled)
-      required: false
+      description: Option name (e.g. enabled)
       example: enabled
+      required: false
       selector:
         text:
     target_entity_id:
-      name: Target Entity
-      description: Sensor entity ID to update with the result
+      name: Target entity ID
+      description: Sensor or entity ID to store the retrieved value in (e.g. sensor.block_user_7085c2_enabled)
       required: false
-      example: sensor.block_user_enabled
+      example: sensor.block_user_7085c2_enabled
       selector:
         entity:
-
+          domain: sensor
 uci_set_commit:
-  name: UCI Set & Commit
-  description: Set a UCI option value and immediately commit the change
+  name: UCI set + commit
+  description: Set a UCI option value and commit the change
   fields:
     config:
       name: Config
-      description: UCI config name (e.g. firewall, wireless, dhcp)
+      description: UCI config name (e.g. firewall)
       required: true
       example: firewall
       selector:
         text:
     section:
       name: Section
-      description: Section name or type/index
+      description: Section name or type/index (e.g. block_user_7085c2)
       required: true
-      example: block_user
+      example: block_user_7085c2
       selector:
         text:
     option:
       name: Option
-      description: Option key to modify
+      description: Option name to set (e.g. enabled)
       required: true
       example: enabled
       selector:
         text:
     value:
       name: Value
-      description: New value (string)
+      description: Option value - string or JSON array for list-type options (e.g. "0", "1", or ["192.168.1.1", "8.8.8.8"])
       required: true
       example: "0"
       selector:
         text:
     service:
-      name: Service to restart
-      description: Service(s) to restart after the change (optional)
+      name: Service
+      description: Optional service name(s) to restart after UCI commit (e.g. "dnsmasq" or ["firewall", "network"]). If provided, specified services will be restarted to apply configuration changes.
       required: false
-      example: firewall
+      example: dnsmasq
       selector:
         text:
-
 uci_network_interface:
-  name: UCI Network Interface
-  description: Call a network.interface ubus method (e.g., up/down)
+  name: UCI call 
+  description: Call  UCI via ubus on the OpenWrt router 
   fields:
     section:
       name: Section
-      description: Network interface section (e.g. network.interface.wwan)
+      description: network interface (e.g. network.interface.wwan)
       required: true
       example: network.interface.wwan
       selector:
         text:
     option:
       name: Option
-      description: Action to perform (e.g. up, down)
+      description: Option name to set (e.g. up or down)
       required: true
       example: up
       selector:

@@ -9,12 +9,13 @@ from typing import Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
 )
+import asyncio
 
 from .const import (
     CONF_SELECTED_SERVICES,
@@ -79,7 +80,12 @@ async def async_setup_entry(
 class OpenwrtServiceSwitch(CoordinatorEntity, SwitchEntity):
     """Representation of an OpenWrt service switch."""
 
-    def __init__(self, coordinator: SharedDataUpdateCoordinator, service_name: str, entry: ConfigEntry) -> None:
+    def __init__(
+        self,
+        coordinator: SharedDataUpdateCoordinator,
+        service_name: str,
+        entry: ConfigEntry,
+    ) -> None:
         """Initialize the switch."""
         super().__init__(coordinator)
         self.service_name = service_name
@@ -88,6 +94,13 @@ class OpenwrtServiceSwitch(CoordinatorEntity, SwitchEntity):
         self._attr_unique_id = f"{self._host}_service_{service_name}"
         self._attr_name = f"{service_name}"
         self._attr_entity_registry_enabled_default = True
+        self._optimistic_state: bool | None = None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        self._optimistic_state = None
+        super()._handle_coordinator_update()
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -102,9 +115,15 @@ class OpenwrtServiceSwitch(CoordinatorEntity, SwitchEntity):
     @property
     def is_on(self) -> bool:
         """Return true if the service is running."""
+        if self._optimistic_state is not None:
+            return self._optimistic_state
+
         if not self.coordinator.data or "service_status" not in self.coordinator.data:
-            _LOGGER.debug("Service %s: No coordinator data or service_status missing. Data keys: %s",
-                          self.service_name, list(self.coordinator.data.keys()) if self.coordinator.data else "None")
+            _LOGGER.debug(
+                "Service %s: No coordinator data or service_status missing. Data keys: %s",
+                self.service_name,
+                list(self.coordinator.data.keys()) if self.coordinator.data else "None",
+            )
             return False
 
         service_data = self.coordinator.data["service_status"].get(self.service_name, {})
@@ -134,18 +153,22 @@ class OpenwrtServiceSwitch(CoordinatorEntity, SwitchEntity):
             "host": self._host,
         }
 
-        if (self.coordinator.data and
-            "service_status" in self.coordinator.data and
-                self.service_name in self.coordinator.data["service_status"]):
+        if (
+            self.coordinator.data
+            and "service_status" in self.coordinator.data
+            and self.service_name in self.coordinator.data["service_status"]
+        ):
             service_data = self.coordinator.data["service_status"][self.service_name]
 
             # Add service status details
             if isinstance(service_data, dict):
-                attributes.update({
-                    "enabled": service_data.get("enabled", False),
-                    "running": service_data.get("running", False),
-                    "start_priority": service_data.get("start_priority"),
-                })
+                attributes.update(
+                    {
+                        "enabled": service_data.get("enabled", False),
+                        "running": service_data.get("running", False),
+                        "start_priority": service_data.get("start_priority"),
+                    }
+                )
 
         return attributes
 
@@ -154,33 +177,49 @@ class OpenwrtServiceSwitch(CoordinatorEntity, SwitchEntity):
         try:
             ubus = await self.coordinator.data_manager.get_ubus_connection_async()
 
+            self._optimistic_state = True
+            self.async_write_ha_state()
+
             # Start the service
             await ubus.service_action(self.service_name, "start")
 
             _LOGGER.info("Started service: %s", self.service_name)
 
-            # Invalidate service status cache and trigger coordinator update
+            # Invalidate service status cache
             self.coordinator.data_manager.invalidate_cache("service_status")
-            await self.coordinator.async_request_refresh()
+            
+            async def delayed_refresh():
+                await asyncio.sleep(2)
+                await self.coordinator.async_request_refresh()
+            self.hass.async_create_task(delayed_refresh())
 
         except Exception as exc:
+            self._optimistic_state = None
+            self.async_write_ha_state()
             _LOGGER.error("Failed to start service %s: %s", self.service_name, exc)
-            raise
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the service off."""
         try:
             ubus = await self.coordinator.data_manager.get_ubus_connection_async()
 
+            self._optimistic_state = False
+            self.async_write_ha_state()
+
             # Stop the service
             await ubus.service_action(self.service_name, "stop")
 
             _LOGGER.info("Stopped service: %s", self.service_name)
 
-            # Invalidate service status cache and trigger coordinator update
+            # Invalidate service status cache
             self.coordinator.data_manager.invalidate_cache("service_status")
-            await self.coordinator.async_request_refresh()
+            
+            async def delayed_refresh():
+                await asyncio.sleep(2)
+                await self.coordinator.async_request_refresh()
+            self.hass.async_create_task(delayed_refresh())
 
         except Exception as exc:
+            self._optimistic_state = None
+            self.async_write_ha_state()
             _LOGGER.error("Failed to stop service %s: %s", self.service_name, exc)
-            raise

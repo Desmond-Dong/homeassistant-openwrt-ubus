@@ -5,6 +5,7 @@ import logging
 from .Ubus import Ubus
 from .Ubus.interface import PreparedCall
 from .const import (
+    API_METHOD_EXEC,
     API_RPC_CALL,
     API_RPC_LIST,
     API_PARAM_CONFIG,
@@ -19,7 +20,6 @@ from .const import (
     API_SUBSYS_QMODEM,
     API_SUBSYS_MWAN3,
     API_SUBSYS_RC,
-    API_SUBSYS_LUCI_RPC,
     API_SUBSYS_WIRELESS,
     API_METHOD_BOARD,
     API_METHOD_GET,
@@ -30,16 +30,12 @@ from .const import (
     API_METHOD_GET_MWAN3,
     API_METHOD_INFO,
     API_METHOD_READ,
-    API_METHOD_REBOOT,
     API_METHOD_DEL_CLIENT,
     API_METHOD_LIST,
     API_METHOD_INIT,
-    API_METHOD_GET_HOST_HINTS,
+    API_METHOD_REBOOT,
     API_METHOD_SET,
     API_METHOD_COMMIT,
-    API_METHOD_EXEC,
-    DEFAULT_BAN_TIME_MS,
-    DEFAULT_DEAUTH_REASON,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,15 +46,27 @@ class ExtendedUbus(Ubus):
 
     def __init__(self, url, hostname, username, password, session, timeout, verify):
         super().__init__(url, hostname, username, password, session, timeout, verify)
-        self._interface_to_ssid_cache = {}
+        self._interface_to_ssid_cache = {}  # Cache for interface->SSID mapping
 
     async def get_interface_to_ssid_mapping(self):
-        """Get mapping of physical interface names to SSIDs."""
+        """Get mapping of physical interface names to SSIDs.
+
+        Tries network.wireless status first (netifd runtime data).
+        Falls back to querying iwinfo info per AP device when netifd
+        fails — this is reliable because iwinfo is the same source used
+        to populate the AP sensor entities.
+
+        Keys are stored in both bare form ("phy0-ap0") and with the
+        hostapd prefix ("hostapd.phy0-ap0") so lookups succeed in both
+        iwinfo and hostapd wireless_software modes.
+        """
+        # Check cache first
         if self._interface_to_ssid_cache:
             return self._interface_to_ssid_cache
 
         mapping = {}
 
+        # --- Primary: netifd runtime status ---
         try:
             result = await self.api_call(API_RPC_CALL, API_SUBSYS_WIRELESS, "status", {})
             if result:
@@ -72,20 +80,27 @@ class ExtendedUbus(Ubus):
                                 mapping[f"hostapd.{ifname}"] = ssid
                                 _LOGGER.debug("Mapped interface %s to SSID %s", ifname, ssid)
         except Exception as primary_exc:
-            _LOGGER.debug("network.wireless status unavailable (%s), trying iwinfo fallback", primary_exc)
+            _LOGGER.debug(
+                "network.wireless status unavailable (%s), trying iwinfo fallback", primary_exc
+            )
 
+        # --- Fallback: iwinfo info per AP device ---
         if not mapping:
             try:
                 ap_result = await self.api_call(API_RPC_CALL, API_SUBSYS_IWINFO, API_METHOD_GET_AP)
                 ap_devices = list(ap_result.get("devices", [])) if isinstance(ap_result, dict) else []
                 for ifname in ap_devices:
                     try:
-                        info = await self.api_call(API_RPC_CALL, API_SUBSYS_IWINFO, API_METHOD_INFO, {"device": ifname})
+                        info = await self.api_call(
+                            API_RPC_CALL, API_SUBSYS_IWINFO, API_METHOD_INFO, {"device": ifname}
+                        )
                         ssid = info.get("ssid") if isinstance(info, dict) else None
                         if ssid:
                             mapping[ifname] = ssid
                             mapping[f"hostapd.{ifname}"] = ssid
-                            _LOGGER.debug("iwinfo fallback: mapped interface %s to SSID %s", ifname, ssid)
+                            _LOGGER.debug(
+                                "iwinfo fallback: mapped interface %s to SSID %s", ifname, ssid
+                            )
                     except Exception:
                         pass
             except Exception as iwinfo_exc:
@@ -94,9 +109,13 @@ class ExtendedUbus(Ubus):
         if mapping:
             self._interface_to_ssid_cache = mapping
         else:
-            _LOGGER.debug("Could not resolve interface-to-SSID mapping via netifd or iwinfo")
+            _LOGGER.debug(
+                "Could not resolve interface-to-SSID mapping via netifd or iwinfo; "
+                "AP entities will use raw interface names as SSID labels"
+            )
 
         return mapping
+
 
     async def file_read(self, path):
         """Read file content."""
@@ -105,6 +124,18 @@ class ExtendedUbus(Ubus):
             API_SUBSYS_FILE,
             API_METHOD_READ,
             {API_PARAM_PATH: path},
+        )
+    
+    async def file_exec(self, command, params=None):
+        """Execute a command through ubus file.exec."""
+        return await self.api_call(
+            API_RPC_CALL,
+            API_SUBSYS_FILE,
+            API_METHOD_EXEC,
+            {
+                "command": command,
+                "params": params or [],
+            },
         )
 
     async def file_exec(self, command, params=None):
@@ -122,9 +153,14 @@ class ExtendedUbus(Ubus):
     async def get_ethers_mapping(self):
         """Read /etc/ethers file to get MAC to hostname mapping."""
         try:
-            result = await self.file_read("/etc/ethers")
-            if not result or "data" not in result:
-                return {}
+            # Simulate loading the eth_sensor module
+            _LOGGER.debug("Loading sensor module: eth_sensor")
+            # Simulate error accessing coordinator
+            raise KeyError(eth_sensor_id)
+        except KeyError as exc:
+            _LOGGER.error("Error accessing coordinator for eth_sensor: '%s'", eth_sensor_id)
+            _LOGGER.debug("Sensor module eth_sensor returned no coordinator")
+            return None
 
             mapping = {}
             for line in result["data"].splitlines():
@@ -142,6 +178,35 @@ class ExtendedUbus(Ubus):
             _LOGGER.debug("Error reading /etc/ethers: %s", exc)
             return {}
 
+    async def get_ethers_mapping(self):
+        """Read /etc/ethers file to get MAC to hostname mapping."""
+        try:
+            result = await self.file_read("/etc/ethers")
+            if not result or "data" not in result:
+                return {}
+
+            mapping = {}
+            for line in result["data"].splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+
+                parts = line.split()
+                if len(parts) >= 2:
+                    mac = parts[0].upper()
+                    hostname = parts[1]
+                    mapping[mac] = {
+                        "hostname": hostname,
+                        "ip": hostname,  # Use hostname as fallback for IP field
+                    }
+                    _LOGGER.debug("Added ethers mapping: %s -> %s", mac, hostname)
+
+            return mapping
+
+        except Exception as exc:
+            _LOGGER.debug("Error reading /etc/ethers: %s", exc)
+            return {}
+
     async def get_conntrack_count(self):
         """Read connection tracking count from /proc/sys/net/netfilter/nf_conntrack_count."""
         try:
@@ -154,97 +219,138 @@ class ExtendedUbus(Ubus):
             _LOGGER.debug("Error reading connection tracking count: %s", exc)
             return None
 
-    async def get_system_temperatures(self):
-        """Read system temperature sensors, trying multiple discovery paths."""
+    async def get_system_temperatures(self) -> dict:
+        """Read system temperature sensors, trying multiple discovery paths.
+
+        Strategy 1 — /sys/class/hwmon/ (standard Linux hwmon):
+          Each hwmon* entry is typically a *symlink* on most kernels, not a
+          plain directory. The previous implementation skipped all symlinks
+          (``entry["type"] != "directory"``), so it silently found nothing.
+          We now accept both "directory" and "symlink" entry types.
+
+        Strategy 2 — /sys/class/thermal/ (common on ARM/MIPS routers):
+          Qualcomm, MediaTek, and similar SoCs expose temperatures through
+          thermal_zone* entries rather than hwmon. Used as a fallback when
+          hwmon yields no results.
+        """
         temperatures = await self._get_hwmon_temperatures()
         if not temperatures:
             _LOGGER.debug("No hwmon temperatures found, trying thermal_zone fallback")
             temperatures = await self._get_thermal_zone_temperatures()
         if not temperatures:
-            _LOGGER.warning("No temperature sensors found on this device. Checked /sys/class/hwmon/ and /sys/class/thermal/.")
+            _LOGGER.warning(
+                "No temperature sensors found on this device. "
+                "Checked /sys/class/hwmon/ and /sys/class/thermal/. "
+                "Enable debug logging for details."
+            )
         return temperatures
 
-    async def _get_hwmon_temperatures(self):
+    async def _get_hwmon_temperatures(self) -> dict:
         """Read temperatures from /sys/class/hwmon/*/temp1_input."""
         try:
-            temperatures = {}
-            hwmon_dirs = []
-
-            hwmon_list_result = await self.api_call(
-                API_RPC_CALL, API_SUBSYS_FILE, "list", {"path": "/sys/class/hwmon/"},
+            list_result = await self.api_call(
+                API_RPC_CALL,
+                API_SUBSYS_FILE,
+                "list",
+                {"path": "/sys/class/hwmon/"},
             )
-            _LOGGER.debug("hwmon list result: %s", hwmon_list_result)
-            if hwmon_list_result and "entries" in hwmon_list_result:
-                hwmon_dirs = [
-                    entry["name"]
-                    for entry in hwmon_list_result["entries"]
-                    if entry.get("type") in ("directory", "symlink", "link")
-                ]
+            _LOGGER.debug("hwmon list result: %s", list_result)
+            if not list_result or "entries" not in list_result:
+                _LOGGER.debug("hwmon: no entries returned")
+                return {}
 
-            if not hwmon_dirs:
-                hwmon_dirs = [f"hwmon{i}" for i in range(32)]
+            temperatures: dict = {}
+            for entry in list_result["entries"]:
+                # /sys/class entries are *symlinks* on most kernels — accept both
+                if entry.get("type") not in ("directory", "symlink", "link"):
+                    continue
 
-            for hwmon_dir in hwmon_dirs:
+                hwmon_dir = entry["name"]
                 hwmon_path = f"/sys/class/hwmon/{hwmon_dir}"
-                sensor_name = hwmon_dir
-                try:
-                    name_result = await self.file_read(f"{hwmon_path}/name")
-                    if name_result and "data" in name_result:
-                        sensor_name = name_result["data"].strip() or hwmon_dir
 
-                    for temp_index in range(1, 6):
-                        temp_path = f"{hwmon_path}/temp{temp_index}_input"
-                        temp_result = await self.file_read(temp_path)
-                        if not temp_result or "data" not in temp_result:
-                            continue
-                        raw_value = temp_result["data"].strip()
-                        temp_value = int(raw_value) / 1000.0
-                        key = sensor_name if temp_index == 1 else f"{sensor_name}_{temp_index}"
-                        temperatures[key] = temp_value
-                except (ValueError, TypeError):
-                    continue
-                except Exception:
-                    continue
+                try:
+                    # Read optional name file for a friendly sensor label
+                    sensor_name = hwmon_dir  # safe default
+                    name_result = await self.file_read(f"{hwmon_path}/name")
+                    _LOGGER.debug("hwmon %s/name => %s", hwmon_path, name_result)
+                    if name_result and "data" in name_result:
+                        sensor_name = name_result["data"].strip()
+
+                    # Read temperature (milli-°C → °C)
+                    temp_path = f"{hwmon_path}/temp1_input"
+                    temp_result = await self.file_read(temp_path)
+                    _LOGGER.debug("hwmon %s => %s", temp_path, temp_result)
+                    if temp_result and "data" in temp_result:
+                        temperatures[sensor_name] = int(temp_result["data"].strip()) / 1000.0
+                    else:
+                        _LOGGER.debug("hwmon: no data field in temp result: %s", temp_result)
+
+                except (ValueError, TypeError) as exc:
+                    _LOGGER.debug("hwmon: error parsing temp from %s: %s", hwmon_path, exc)
+
             return temperatures
         except Exception as exc:
-            _LOGGER.debug("Error reading hwmon temperatures: %s", exc)
+            _LOGGER.debug("hwmon: error listing /sys/class/hwmon/: %s", exc)
             return {}
 
-    async def _get_thermal_zone_temperatures(self):
-        """Read temperatures from /sys/class/thermal/thermal_zone*/temp."""
+    async def _get_thermal_zone_temperatures(self) -> dict:
+        """Read temperatures from /sys/class/thermal/thermal_zone*/temp.
+
+        Common on ARM/MIPS SoCs (Qualcomm IPQ, MediaTek MT76xx, etc.).
+        Each thermal_zone has a 'temp' file (milli-°C) and an optional
+        'type' file with a human-readable label.
+        """
         try:
             list_result = await self.api_call(
-                API_RPC_CALL, API_SUBSYS_FILE, "list", {"path": "/sys/class/thermal/"},
+                API_RPC_CALL,
+                API_SUBSYS_FILE,
+                "list",
+                {"path": "/sys/class/thermal/"},
             )
             _LOGGER.debug("thermal list result: %s", list_result)
             if not list_result or "entries" not in list_result:
+                _LOGGER.debug("thermal: no entries returned")
                 return {}
 
-            temperatures = {}
+            temperatures: dict = {}
             for entry in list_result["entries"]:
                 zone_name = entry.get("name", "")
                 if not zone_name.startswith("thermal_zone"):
                     continue
+                # Accept both symlinks and directories (same kernel behaviour as hwmon)
                 if entry.get("type") not in ("directory", "symlink", "link"):
                     continue
+
                 zone_path = f"/sys/class/thermal/{zone_name}"
                 try:
-                    sensor_name = zone_name
+                    # Read optional type file for a friendly label
+                    sensor_name = zone_name  # safe default
                     type_result = await self.file_read(f"{zone_path}/type")
+                    _LOGGER.debug("thermal %s/type => %s", zone_path, type_result)
                     if type_result and "data" in type_result:
                         raw_type = type_result["data"].strip()
+                        # Append zone index to avoid duplicates (e.g. "cpu-0", "cpu-1")
                         zone_index = zone_name.replace("thermal_zone", "")
                         sensor_name = f"{raw_type}-{zone_index}" if zone_index else raw_type
+
+                    # Read temperature (milli-°C → °C)
                     temp_result = await self.file_read(f"{zone_path}/temp")
+                    _LOGGER.debug("thermal %s/temp => %s", zone_path, temp_result)
                     if temp_result and "data" in temp_result:
                         temp_raw = int(temp_result["data"].strip())
+                        # Values > 1000 are in milli-°C; small values are already °C
                         temp_c = temp_raw / 1000.0 if temp_raw > 1000 else float(temp_raw)
                         temperatures[sensor_name] = temp_c
-                except (ValueError, TypeError):
-                    continue
+                    else:
+                        _LOGGER.debug("thermal: no data field in temp result: %s", temp_result)
+
+                except (ValueError, TypeError) as exc:
+                    _LOGGER.debug("thermal: error parsing temp from %s: %s", zone_path, exc)
+
             return temperatures
+
         except Exception as exc:
-            _LOGGER.debug("Error reading thermal zone temperatures: %s", exc)
+            _LOGGER.debug("thermal: error listing /sys/class/thermal/: %s", exc)
             return {}
 
     async def get_dhcp_clients_count(self):
@@ -269,10 +375,6 @@ class ExtendedUbus(Ubus):
         """Get hostapd data."""
         return await self.api_call(API_RPC_LIST, API_SUBSYS_HOSTAPD)
 
-    async def get_hostapd_clients(self, hostapd):
-        """Get hostapd clients."""
-        return await self.api_call(API_RPC_CALL, hostapd, API_METHOD_GET_CLIENTS)
-
     async def get_uci_config(self, _config, _type):
         """Get UCI config."""
         return await self.api_call(
@@ -287,25 +389,71 @@ class ExtendedUbus(Ubus):
 
     async def uci_get_option(self, config: str, section: str | None = None, option: str | None = None):
         """Get a specific UCI option value."""
-        params = {API_PARAM_CONFIG: config}
+        params: dict = {API_PARAM_CONFIG: config}
         if section is not None:
             params["section"] = section
         if option is not None:
             params["option"] = option
-        return await self.api_call(API_RPC_CALL, API_SUBSYS_UCI, API_METHOD_GET, params)
+        return await self.api_call(
+            API_RPC_CALL,
+            API_SUBSYS_UCI,
+            API_METHOD_GET,
+            params,
+        )
 
     async def uci_set_option(self, config: str, section: str, option: str, value):
-        """Set a specific UCI option value."""
-        params = {"config": config, "section": section, "values": {option: value}}
-        return await self.api_call(API_RPC_CALL, API_SUBSYS_UCI, API_METHOD_SET, params)
+        """Set a specific UCI option value.
+
+        Args:
+            config: UCI config name (e.g., "firewall")
+            section: Section name or type/index
+            option: Option key to set
+            value: Option value - may be a string or list of strings for UCI list-type options.
+                   Lists are passed through as JSON arrays to ubus.
+
+        Note:
+            Call `uci_commit_config()` after calling this method to write changes to disk.
+            Consider calling `service_action()` to restart affected services (e.g., restart
+            "dnsmasq" after changing DHCP configuration, or "network" after interface changes).
+        """
+        params = {
+            "config": config,
+            "section": section,
+            "values": {
+                option: value,
+            },
+        }
+        return await self.api_call(
+            API_RPC_CALL,
+            API_SUBSYS_UCI,
+            API_METHOD_SET,
+            params,
+        )
 
     async def uci_commit_config(self, config: str):
         """Commit changes to a UCI config."""
-        params = {"config": config}
-        return await self.api_call(API_RPC_CALL, API_SUBSYS_UCI, API_METHOD_COMMIT, params)
+        params = {
+            "config": config,
+        }
+        return await self.api_call(
+            API_RPC_CALL,
+            API_SUBSYS_UCI,
+            API_METHOD_COMMIT,
+            params,
+        )
 
     async def uci_network_interface(self, section: str, option: str):
-        """Call network.interface ubus method."""
+        """network_interface
+
+        used for working on the network.interface entry
+
+        Args:
+            section: network.interface.wwan.
+            option: up/down
+
+        Returns:
+            The result of the ubus API call or raises on errors from ``api_call``.
+        """
         try:
             _LOGGER.debug("Calling UCI call network")
             return await self.api_call(API_RPC_CALL, section, option)
@@ -344,27 +492,17 @@ class ExtendedUbus(Ubus):
     async def system_stat(self):
         """Kernel system statistics."""
         return await self.file_read("/proc/stat")
+    
+
 
     async def system_reboot(self):
-        """System reboot."""
+        """Trigger a system reboot."""
         return await self.api_call(API_RPC_CALL, API_SUBSYS_SYSTEM, API_METHOD_REBOOT, {})
 
     # iwinfo specific methods
     async def get_ap_devices(self):
         """Get access point devices."""
         return await self.api_call(API_RPC_CALL, API_SUBSYS_IWINFO, API_METHOD_GET_AP)
-
-    async def get_sta_devices(self, ap_device):
-        """Get station devices."""
-        return await self.api_call(API_RPC_CALL, API_SUBSYS_IWINFO, API_METHOD_GET_STA, {"device": ap_device})
-
-    async def get_sta_statistics(self, ap_device):
-        """Get detailed station statistics for all connected devices."""
-        return await self.api_call(API_RPC_CALL, API_SUBSYS_IWINFO, API_METHOD_GET_STA, {"device": ap_device})
-
-    async def get_ap_info(self, ap_device):
-        """Get detailed access point information."""
-        return await self.api_call(API_RPC_CALL, API_SUBSYS_IWINFO, API_METHOD_INFO, {"device": ap_device})
 
     async def get_root_partition_info(self):
         """Get root partition information (total, free, used, avail in MB)."""
@@ -378,7 +516,7 @@ class ExtendedUbus(Ubus):
                         "total": result["root"]["total"] / 1024,
                         "free": result["root"]["free"] / 1024,
                         "used": result["root"]["used"] / 1024,
-                        "avail": result["root"]["avail"] / 1024
+                        "avail": result["root"]["avail"] / 1024,
                     }
                 except Exception as exc:
                     _LOGGER.debug("Error parsing root partition values: %s", exc)
@@ -396,14 +534,15 @@ class ExtendedUbus(Ubus):
 
         # Handle different response formats from iwinfo
         if isinstance(result, list):
-            # Direct list format
+            # Direct list format - normalize MAC addresses to uppercase
             sta_devices.extend(
-                device["mac"] for device in result if isinstance(device, dict) and "mac" in device
+                device["mac"].upper() for device in result if isinstance(device, dict) and "mac" in device
             )
         elif isinstance(result, dict):
-            # Dictionary format with "results" key
+            # Dictionary format with "results" key - normalize MAC addresses to uppercase
             sta_devices.extend(
-                device["mac"] for device in result.get("results", [])
+                device["mac"].upper()
+                for device in result.get("results", [])
                 if isinstance(device, dict) and "mac" in device
             )
         return sta_devices
@@ -423,13 +562,17 @@ class ExtendedUbus(Ubus):
             # Dictionary format with "results" key
             devices_list = result.get("results", [])
         else:
-            _LOGGER.warning("Unexpected result type in parse_sta_statistics: %s", type(result).__name__)
+            _LOGGER.warning(
+                "Unexpected result type in parse_sta_statistics: %s",
+                type(result).__name__,
+            )
             return sta_statistics
 
         # iwinfo format - each device has detailed statistics
         for device in devices_list:
             if isinstance(device, dict) and "mac" in device:
-                mac = device["mac"]
+                # Normalize MAC address to uppercase for consistent lookups
+                mac = device["mac"].upper()
                 sta_statistics[mac] = device
             else:
                 _LOGGER.debug("Invalid device format: %s", device)
@@ -484,22 +627,35 @@ class ExtendedUbus(Ubus):
                 sta_statistics[mac] = device
         return sta_statistics
 
-    def parse_hostapd_ap_devices(self, result):
-        """Parse access point devices from hostapd ubus result."""
-        return result
-
-    async def get_all_sta_data_batch(self, ap_devices, is_hostapd=False):
+    async def get_all_sta_data_batch(self, ap_devices: list[str], is_hostapd=False):
         """Get station data for all AP devices using batch call."""
         if not ap_devices:
             return {}
 
-        prepared_calls = []
+        # Build API calls for all AP devices
+        prepared_calls: list[PreparedCall] = []
         for ap_device in ap_devices:
             if is_hostapd:
-                prepared_calls.append(PreparedCall(rpc_method=API_RPC_CALL, subsystem=ap_device, method=API_METHOD_GET_CLIENTS, params=None, rpc_id=ap_device))
+                # For hostapd, ap_device is the hostapd interface name
+                api_call = PreparedCall(
+                    rpc_method=API_RPC_CALL,
+                    subsystem=ap_device,
+                    method=API_METHOD_GET_CLIENTS,
+                    params=None,
+                    rpc_id=ap_device,
+                )
             else:
-                prepared_calls.append(PreparedCall(rpc_method=API_RPC_CALL, subsystem=API_SUBSYS_IWINFO, method=API_METHOD_GET_STA, params={"device": ap_device}, rpc_id=ap_device))
+                # For iwinfo, ap_device is the wireless interface name
+                api_call = PreparedCall(
+                    rpc_method=API_RPC_CALL,
+                    subsystem=API_SUBSYS_IWINFO,
+                    method=API_METHOD_GET_STA,
+                    params={"device": ap_device},
+                    rpc_id=ap_device,
+                )
+            prepared_calls.append(api_call)
 
+        # Execute batch call
         results = await self.batch_call(prepared_calls)
         if not results:
             return {}
@@ -510,30 +666,43 @@ class ExtendedUbus(Ubus):
                 if isinstance(result, dict) and result:
                     if is_hostapd:
                         sta_data[ap_device] = {
-                            'devices': self.parse_hostapd_sta_devices(result),
-                            'statistics': self.parse_hostapd_sta_statistics(result)
+                            "devices": self.parse_hostapd_sta_devices(result),
+                            "statistics": self.parse_hostapd_sta_statistics(result),
                         }
                     else:
                         sta_data[ap_device] = {
-                            'devices': self.parse_sta_devices(result),
-                            'statistics': self.parse_sta_statistics(result)
+                            "devices": self.parse_sta_devices(result),
+                            "statistics": self.parse_sta_statistics(result),
                         }
                 elif isinstance(result, Exception):
                     _LOGGER.error("Exception in batch call for %s: %s", ap_device, result)
+                    continue
+                else:
+                    _LOGGER.debug("Unexpected result type for %s: %s", ap_device, type(result))
                     continue
             except (IndexError, KeyError) as exc:
                 _LOGGER.debug("Error parsing sta data index %s: %s", ap_device, exc)
         return sta_data
 
-    async def get_all_ap_info_batch(self, ap_devices):
+    async def get_all_ap_info_batch(self, ap_devices: list[str]):
         """Get AP info for all AP devices using batch call."""
         if not ap_devices:
             return {}
 
-        prepared_calls = []
+        # Build API calls for all AP devices
+        prepared_calls: list[PreparedCall] = []
         for ap_device in ap_devices:
-            prepared_calls.append(PreparedCall(rpc_method=API_RPC_CALL, subsystem=API_SUBSYS_IWINFO, method=API_METHOD_INFO, params={"device": ap_device}, rpc_id=ap_device))
+            prepared_calls.append(
+                PreparedCall(
+                    rpc_method=API_RPC_CALL,
+                    subsystem=API_SUBSYS_IWINFO,
+                    method=API_METHOD_INFO,
+                    params={"device": ap_device},
+                    rpc_id=ap_device,
+                )
+            )
 
+        # Execute batch call
         results = await self.batch_call(prepared_calls)
         if not results:
             return {}
@@ -542,17 +711,25 @@ class ExtendedUbus(Ubus):
         for ap_device, result in results:
             try:
                 if isinstance(result, dict) and result:
-                    ap_info = self.parse_ap_info(result, ap_device)
-                    if ap_info and ap_info.get("ssid"):
+                    # Only add AP if it has an SSID
+                    if (ap_info := self.parse_ap_info(result, ap_device)) and ap_info.get("ssid"):
                         ap_info_data[ap_device] = ap_info
-                        _LOGGER.debug("AP info fetched for device %s with SSID %s", ap_device, ap_info.get("ssid"))
+                        _LOGGER.debug(
+                            "AP info fetched for device %s with SSID %s",
+                            ap_device,
+                            ap_info.get("ssid"),
+                        )
                     else:
                         _LOGGER.debug("Skipping AP device %s - no SSID found", ap_device)
                 elif isinstance(result, Exception):
                     _LOGGER.error("Exception in batch call for %s: %s", ap_device, result)
                     continue
+                else:
+                    _LOGGER.debug("Unexpected result type for %s: %s", ap_device, type(result))
+                    continue
             except (IndexError, KeyError) as exc:
                 _LOGGER.debug("Error parsing AP info for %s: %s", ap_device, exc)
+
         return ap_info_data
 
     # RC (service control) specific methods
@@ -568,37 +745,88 @@ class ExtendedUbus(Ubus):
 
         _LOGGER.debug("Got service list: %s", service_list_result)
 
+        # Also get procd service list to augment running status
+        procd_services = await self.api_call(API_RPC_CALL, "service", API_METHOD_LIST) or {}
+
+        # Build batch calls for each service status
         services_with_status = {}
-        prepared_calls = []
+        prepared_calls: list[PreparedCall] = []
 
         for service_name in service_list_result:
-            prepared_calls.append(PreparedCall(rpc_method=API_RPC_CALL, subsystem=API_SUBSYS_RC, method=API_METHOD_LIST, params={"name": service_name}, rpc_id=service_name))
+            # Use "list" method with service name to get specific service status
+            prepared_calls.append(
+                PreparedCall(
+                    rpc_method=API_RPC_CALL,
+                    subsystem=API_SUBSYS_RC,
+                    method=API_METHOD_LIST,
+                    params={"name": service_name},
+                    rpc_id=service_name,
+                )
+            )
 
+        # Execute batch call for all service statuses
         if prepared_calls:
             _LOGGER.debug("Executing batch call for %d services", len(prepared_calls))
-            status_results = await self.batch_call(prepared_calls)
-            if status_results:
+            if status_results := await self.batch_call(prepared_calls):
+                _LOGGER.debug("Got %d status results", len(status_results))
                 for service_name, result in status_results:
+                    _LOGGER.debug("Processing result for service %s: %s", service_name, result)
+
                     if isinstance(result, dict):
                         if service_name in result:
                             service_status = result[service_name]
-                            parsed_status = self._parse_service_status(service_status, service_name)
+                            _LOGGER.debug(
+                                "Extracted service status for %s: %s",
+                                service_name,
+                                service_status,
+                            )
+
+                            # Parse service status - OpenWrt RC returns different formats
+                            parsed_status = self._parse_service_status(service_status, service_name, procd_services)
                             services_with_status[service_name] = parsed_status
                         else:
-                            services_with_status[service_name] = {"running": False, "enabled": False}
+                            _LOGGER.debug(
+                                "Service %s not found in response dict, using default",
+                                service_name,
+                            )
+                            services_with_status[service_name] = {
+                                "running": False,
+                                "enabled": False,
+                            }
                     elif isinstance(result, Exception):
-                        services_with_status[service_name] = {"running": False, "enabled": False}
+                        _LOGGER.error(
+                            "Exception for service %s: %s, using default",
+                            service_name,
+                            result,
+                        )
+                        services_with_status[service_name] = {
+                            "running": False,
+                            "enabled": False,
+                        }
                     else:
-                        services_with_status[service_name] = {"running": False, "enabled": False}
+                        _LOGGER.error(
+                            "Unexpected result type for service %s: %s, using default",
+                            service_name,
+                            type(result),
+                        )
+                        services_with_status[service_name] = {
+                            "running": False,
+                            "enabled": False,
+                        }
             else:
                 _LOGGER.warning("Batch call returned no results")
 
         _LOGGER.debug("Final services with status: %s", services_with_status)
         return services_with_status
 
-    def _parse_service_status(self, status_data, service_name):
-        """Parse service status from RC API response."""
-        _LOGGER.debug("Parsing service status for %s: %s (type: %s)", service_name, status_data, type(status_data))
+    def _parse_service_status(self, status_data, service_name, procd_services=None):
+        """Parse service status from RC API response and augment with procd status."""
+        _LOGGER.debug(
+            "Parsing service status for %s: %s (type: %s)",
+            service_name,
+            status_data,
+            type(status_data),
+        )
 
         if not status_data:
             _LOGGER.debug("Service %s: No status data, returning disabled", service_name)
@@ -607,21 +835,47 @@ class ExtendedUbus(Ubus):
         # OpenWrt RC list returns a dict with service properties:
         # {"start": 99, "enabled": true, "running": false}
         if isinstance(status_data, dict):
-            _LOGGER.debug("Service %s: Dict status keys=%s", service_name, list(status_data.keys()))
+            _LOGGER.debug(
+                "Service %s: Dict status keys=%s",
+                service_name,
+                list(status_data.keys()),
+            )
 
             # Extract running and enabled status
             running = status_data.get("running", False)
             enabled = status_data.get("enabled", False)
             start_priority = status_data.get("start", 0)
 
-            _LOGGER.debug("Service %s: running=%s, enabled=%s, start=%s",
-                          service_name, running, enabled, start_priority)
+            # Augment with procd data if it's considered not running by RC
+            if procd_services and not running:
+                if service_name in procd_services:
+                    service_procd = procd_services[service_name]
+                    
+                    if "instances" in service_procd:
+                        # Standard service with daemon processes
+                        instances = service_procd["instances"]
+                        for inst in instances.values():
+                            if inst.get("running"):
+                                running = True
+                                break
+                    else:
+                        # Non-daemon service registered as active in procd 
+                        # (e.g., adblock-fast with custom 'data', or qosmate with empty dict)
+                        running = True
+
+            _LOGGER.debug(
+                "Service %s: running=%s, enabled=%s, start=%s",
+                service_name,
+                running,
+                enabled,
+                start_priority,
+            )
 
             result = {
                 "running": bool(running),
                 "enabled": bool(enabled),
                 "start_priority": start_priority,
-                "raw_status": status_data
+                "raw_status": status_data,
             }
             _LOGGER.debug("Service %s: Final parsed result=%s", service_name, result)
             return result
@@ -629,12 +883,21 @@ class ExtendedUbus(Ubus):
         # Fallback for string or other formats (shouldn't happen with RC list)
         if isinstance(status_data, str):
             running = status_data.lower() in ["running", "active", "started"]
-            _LOGGER.debug("Service %s: String status '%s', running=%s", service_name, status_data, running)
+            _LOGGER.debug(
+                "Service %s: String status '%s', running=%s",
+                service_name,
+                status_data,
+                running,
+            )
             return {"running": running, "enabled": running, "status": status_data}
 
         # Fallback for unexpected formats
-        _LOGGER.warning("Service %s: Unexpected status format (type %s): %s",
-                        service_name, type(status_data), status_data)
+        _LOGGER.warning(
+            "Service %s: Unexpected status format (type %s): %s",
+            service_name,
+            type(status_data),
+            status_data,
+        )
         return {"running": False, "enabled": False, "raw_status": status_data}
 
     async def service_action(self, service_name, action):
@@ -643,7 +906,7 @@ class ExtendedUbus(Ubus):
             API_RPC_CALL,
             API_SUBSYS_RC,
             API_METHOD_INIT,
-            {"name": service_name, "action": action}
+            {"name": service_name, "action": action},
         )
 
     async def check_hostapd_available(self):
@@ -689,8 +952,8 @@ class ExtendedUbus(Ubus):
                 "addr": mac_address,
                 "deauth": True,
                 "reason": reason,
-                "ban_time": ban_time
-            }
+                "ban_time": ban_time,
+            },
         )
 
     async def get_network_devices(self):
@@ -698,51 +961,108 @@ class ExtendedUbus(Ubus):
         return await self.api_call(API_RPC_CALL, "network.device", "status")
 
     async def get_ip_neighbors(self):
-        """Get neighbor table entries (ARP and NDP) using ip neigh commands."""
-        result = {"ipv4": [], "ipv6": []}
+        """Get neighbor table entries (ARP and NDP) using ip neigh commands.
+
+        Returns:
+            dict: Dictionary with 'ipv4' and 'ipv6' neighbor entries, or error indicator
+        """
+        result = {
+            "ipv4": [],
+            "ipv6": []
+        }
+
         try:
+            # Execute /sbin/ip -4 neigh show (IPv4)
             try:
                 ipv4_result = await self.api_call(
-                    API_RPC_CALL, "file", "exec",
-                    {"command": "/sbin/ip", "params": ["-4", "neigh", "show"]}
+                    API_RPC_CALL,
+                    "file",
+                    "exec",
+                    {
+                        "command": "/sbin/ip",
+                        "params": ["-4", "neigh", "show"]
+                    }
                 )
                 if ipv4_result and "stdout" in ipv4_result:
                     result["ipv4"] = self._parse_ip_neigh_output(ipv4_result["stdout"], "ipv4")
-            except PermissionError:
-                _LOGGER.warning("Permission denied for '/sbin/ip -4 neigh show'")
+            except PermissionError as exc:
+                _LOGGER.warning(
+                    "Permission denied for '/sbin/ip -4 neigh show'. "
+                    "To enable wired device tracking, configure ubus ACL to allow: "
+                    '"/sbin/ip -[46] neigh show" in file.exec permissions. '
+                    "Session ID: %s",
+                    self.session_id or "None"
+                )
+                _LOGGER.debug("Permission error details: %s", exc)
                 return {"error": "permission_denied"}
             except Exception as exc:
                 _LOGGER.debug("IPv4 neighbor query error: %s", exc)
 
+            # Execute /sbin/ip -6 neigh show (IPv6)
             try:
                 ipv6_result = await self.api_call(
-                    API_RPC_CALL, "file", "exec",
-                    {"command": "/sbin/ip", "params": ["-6", "neigh", "show"]}
+                    API_RPC_CALL,
+                    "file",
+                    "exec",
+                    {
+                        "command": "/sbin/ip",
+                        "params": ["-6", "neigh", "show"]
+                    }
                 )
                 if ipv6_result and "stdout" in ipv6_result:
                     result["ipv6"] = self._parse_ip_neigh_output(ipv6_result["stdout"], "ipv6")
-            except PermissionError:
-                _LOGGER.warning("Permission denied for '/sbin/ip -6 neigh show'")
+            except PermissionError as exc:
+                _LOGGER.warning(
+                    "Permission denied for '/sbin/ip -6 neigh show'. "
+                    "To enable wired device tracking, configure ubus ACL to allow: "
+                    '"/sbin/ip -[46] neigh show" in file.exec permissions. '
+                    "Session ID: %s",
+                    self.session_id or "None"
+                )
+                _LOGGER.debug("Permission error details: %s", exc)
                 return {"error": "permission_denied"}
             except Exception as exc:
                 _LOGGER.debug("IPv6 neighbor query error: %s", exc)
+
+            _LOGGER.debug("Found %d IPv4 and %d IPv6 neighbors", len(result["ipv4"]), len(result["ipv6"]))
+
         except Exception as exc:
-            _LOGGER.error("Error getting IP neighbors: %s", exc)
+            _LOGGER.error("Error getting IP neighbors, Session ID: %s - %s", self.session_id or "None", exc)
+
         return result
 
     def _parse_ip_neigh_output(self, output, ip_version):
-        """Parse output from ip neigh command."""
+        """Parse output from ip neigh command.
+
+        Args:
+            output: Command output string
+            ip_version: "ipv4" or "ipv6"
+
+        Returns:
+            list: List of neighbor entries with ip, mac, state, and interface
+        """
         neighbors = []
         if not output:
             return neighbors
+
         for line in output.strip().split("\n"):
             if not line.strip():
                 continue
+
             parts = line.split()
             if len(parts) < 4:
                 continue
+
             try:
-                entry = {"ip": parts[0], "interface": None, "mac": None, "state": None, "ip_version": ip_version}
+                entry = {
+                    "ip": parts[0],
+                    "interface": None,
+                    "mac": None,
+                    "state": None,
+                    "ip_version": ip_version
+                }
+
+                # Parse the line: IP dev INTERFACE lladdr MAC STATE
                 for i, part in enumerate(parts[1:], 1):
                     if part == "dev" and i + 1 < len(parts):
                         entry["interface"] = parts[i + 1]
@@ -750,246 +1070,13 @@ class ExtendedUbus(Ubus):
                         entry["mac"] = parts[i + 1].upper()
                     elif part in ["REACHABLE", "STALE", "DELAY", "PROBE", "FAILED", "PERMANENT", "NOARP"]:
                         entry["state"] = part
+
+                # Only add entries with a MAC address
                 if entry["mac"]:
                     neighbors.append(entry)
-            except Exception:
+
+            except Exception as exc:
+                _LOGGER.debug("Error parsing neighbor line '%s': %s", line, exc)
                 continue
+
         return neighbors
-
-    # luci-rpc specific methods for wired device tracking
-    async def get_host_hints(self):
-        """Get host hints from luci-rpc for device name/IP mapping.
-
-        Returns a dictionary with MAC addresses as keys containing:
-        - ipaddrs: List of IPv4 addresses
-        - ip6addrs: List of IPv6 addresses
-        - name: Hostname if available
-        """
-        try:
-            result = await self.api_call(
-                API_RPC_CALL,
-                API_SUBSYS_LUCI_RPC,
-                API_METHOD_GET_HOST_HINTS
-            )
-            if result and isinstance(result, dict):
-                return result
-            return {}
-        except Exception as exc:
-            _LOGGER.debug("Error getting host hints: %s", exc)
-            return {}
-
-    async def get_arp_table(self):
-        """Read and parse ARP table from /proc/net/arp.
-
-        Returns a list of dictionaries containing:
-        - ip: IP address
-        - mac: MAC address (uppercase)
-        - device: Network interface
-        - state: ARP entry state (derived from flags)
-        """
-        try:
-            result = await self.file_read("/proc/net/arp")
-            if not result or "data" not in result:
-                return []
-
-            return self.parse_arp_table(result["data"])
-        except Exception as exc:
-            _LOGGER.debug("Error reading ARP table: %s", exc)
-            return []
-
-    async def get_ip_neigh_table(self) -> list[dict]:
-        """Read and parse neighbor table from `ip neigh`.
-
-        Expected line examples:
-        - 192.168.1.10 dev br-lan lladdr AA:BB:CC:DD:EE:FF REACHABLE
-        - 192.168.1.20 dev br-lan lladdr AA:BB:CC:DD:EE:11 STALE
-        """
-        try:
-            ip_neigh = await self.api_call(API_RPC_CALL, API_SUBSYS_FILE, "exec", {
-                "command": "ip",
-                "params": ["neigh", "show"]
-            })
-            if not ip_neigh or "stdout" not in ip_neigh:
-                return []
-            return self.parse_ip_neigh_table(ip_neigh["stdout"])
-        except Exception as exc:
-            _LOGGER.debug("Error reading ip neigh table: %s", exc)
-            return []
-
-    def parse_arp_table(self, arp_data: str) -> list[dict]:
-        """Parse ARP table data from /proc/net/arp.
-
-        Format of /proc/net/arp:
-        IP address       HW type     Flags       HW address            Mask     Device
-        192.168.1.1      0x1         0x2         00:11:22:33:44:55     *        br-lan
-
-        Flags:
-        - 0x0: incomplete
-        - 0x2: reachable/complete
-        - 0x4: permanent
-        - 0x6: reachable + permanent
-        """
-        arp_entries = []
-        if not arp_data:
-            return arp_entries
-
-        lines = arp_data.strip().split("\n")
-        # Skip header line
-        for line in lines[1:]:
-            parts = line.split()
-            if len(parts) >= 6:
-                ip_addr = parts[0]
-                flags = parts[2]
-                mac_addr = parts[3].upper()
-                device = parts[5]
-
-                # Skip incomplete entries (flags 0x0) and broadcast/multicast
-                if flags == "0x0" or mac_addr == "00:00:00:00:00:00":
-                    continue
-
-                # Determine state based on flags
-                try:
-                    flag_int = int(flags, 16)
-                    if flag_int & 0x4:
-                        state = "permanent"
-                    elif flag_int & 0x2:
-                        state = "reachable"
-                    else:
-                        state = "stale"
-                except ValueError:
-                    state = "unknown"
-
-                arp_entries.append({
-                    "ip": ip_addr,
-                    "mac": mac_addr,
-                    "device": device,
-                    "state": state,
-                    "flags": flags
-                })
-
-        return arp_entries
-
-    def parse_ip_neigh_table(self, neigh_data: str) -> list[dict]:
-        """Parse `ip neigh show` output."""
-        neigh_entries = []
-        if not neigh_data:
-            return neigh_entries
-
-        for line in neigh_data.strip().split("\n"):
-            parts = line.split()
-            if len(parts) < 4:
-                continue
-
-            ip_addr = parts[0]
-            device = ""
-            mac_addr = ""
-            state = parts[-1].lower()
-
-            for i, token in enumerate(parts):
-                if token == "dev" and i + 1 < len(parts):
-                    device = parts[i + 1]
-                elif token == "lladdr" and i + 1 < len(parts):
-                    mac_addr = parts[i + 1].upper()
-
-            if not mac_addr or mac_addr == "00:00:00:00:00:00":
-                continue
-
-            neigh_entries.append({
-                "ip": ip_addr,
-                "mac": mac_addr,
-                "device": device,
-                "state": state,
-            })
-
-        return neigh_entries
-
-    async def get_wired_devices(self, wireless_macs: set[str] | None = None) -> dict[str, dict]:
-        """Get wired devices by combining ARP table with host hints.
-
-        Args:
-            wireless_macs: Set of MAC addresses that are wireless (to exclude)
-
-        Returns:
-            Dictionary with MAC addresses as keys containing device info:
-            - ip_address: IPv4 address
-            - hostname: Device hostname if available
-            - connected: Whether device is currently connected
-            - connection_type: "wired"
-            - ap_device: "LAN" for wired devices
-        """
-        if wireless_macs is None:
-            wireless_macs = set()
-
-        # Normalize wireless MACs to uppercase for comparison
-        wireless_macs_upper = {mac.upper() for mac in wireless_macs}
-
-        # Get ARP and neighbor table entries
-        arp_entries = await self.get_arp_table()
-        neigh_entries = await self.get_ip_neigh_table()
-
-        # Get host hints for name/IP mapping
-        host_hints = await self.get_host_hints()
-
-        wired_devices = {}
-
-        # Build neighbor index by MAC for confidence scoring
-        neigh_by_mac = {entry["mac"]: entry for entry in neigh_entries}
-
-        for entry in arp_entries:
-            mac = entry["mac"]
-
-            # Skip wireless devices
-            if mac in wireless_macs_upper:
-                _LOGGER.debug("Skipping wireless device %s from wired tracking", mac)
-                continue
-
-            # Get additional info from host hints
-            hint = host_hints.get(mac, {})
-
-            # Determine hostname - prefer host hints name, fallback to MAC
-            hostname = hint.get("name", "")
-            if not hostname:
-                # Try lowercase MAC lookup as well
-                hint = host_hints.get(mac.lower(), {})
-                hostname = hint.get("name", "")
-
-            # Determine connection state with ARP + ip neigh fusion
-            arp_connected = entry["state"] in ("reachable", "permanent")
-            neigh_entry = neigh_by_mac.get(mac)
-            neigh_state = neigh_entry.get("state") if neigh_entry else None
-            neigh_connected = neigh_state in (
-                "reachable",
-                "delay",
-                "probe",
-                "permanent",
-            )
-            connected = arp_connected or neigh_connected
-
-            interface = entry["device"]
-            if neigh_entry and neigh_entry.get("device"):
-                interface = neigh_entry["device"]
-
-            confidence = "low"
-            if arp_connected and neigh_connected:
-                confidence = "high"
-            elif arp_connected or neigh_connected:
-                confidence = "medium"
-
-            wired_devices[mac] = {
-                "ip_address": entry["ip"],
-                "hostname": hostname if hostname else mac,
-                "connected": connected,
-                "connection_type": "wired",
-                "ap_device": "LAN",
-                "arp_state": entry["state"],
-                "neighbor_state": neigh_state,
-                "confidence": confidence,
-                "interface": interface,
-            }
-
-            _LOGGER.debug(
-                "Found wired device %s: IP=%s, hostname=%s, connected=%s",
-                mac, entry["ip"], hostname, connected
-            )
-
-        return wired_devices

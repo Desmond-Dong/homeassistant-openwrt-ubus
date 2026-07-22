@@ -6,6 +6,9 @@ DOMAIN = "openwrt_ubus"
 PLATFORMS = [Platform.DEVICE_TRACKER, Platform.SENSOR, Platform.SWITCH, Platform.BUTTON]
 
 # Configuration constants
+CONF_USE_HTTPS = "use_https"
+CONF_PORT = "port"
+CONF_ENDPOINT = "endpoint"
 CONF_DHCP_SOFTWARE = "dhcp_software"
 CONF_WIRELESS_SOFTWARE = "wireless_software"
 CONF_USE_HTTPS = "use_https"
@@ -16,15 +19,10 @@ CONF_ENDPOINT = "endpoint"
 CONF_TRACKING_METHOD = "tracking_method"
 DEFAULT_DHCP_SOFTWARE = "dnsmasq"
 DEFAULT_WIRELESS_SOFTWARE = "iwinfo"
-DEFAULT_USE_HTTPS = False
-DEFAULT_VERIFY_SSL = False  # Default to not verifying SSL for self-signed certificates
-DEFAULT_HTTP_PORT = 80
-DEFAULT_HTTPS_PORT = 443
-DEFAULT_ENDPOINT = "ubus"
-TRACKING_METHODS = ["combined", "uniqueid"]
-DEFAULT_TRACKING_METHOD = "combined"
 DHCP_SOFTWARES = ["dnsmasq", "odhcpd", "ethers", "none"]
 WIRELESS_SOFTWARES = ["hostapd", "iwinfo", "none"]
+TRACKING_METHODS = ["uniqueid", "combined"]
+CONF_TRACKING_METHOD = "tracking_method"
 
 # Device kick constants
 DEFAULT_BAN_TIME_MS = 60000  # Default ban time in milliseconds (60 seconds)
@@ -36,13 +34,12 @@ CONF_ENABLE_STA_SENSORS = "enable_sta_sensors"
 CONF_ENABLE_SYSTEM_SENSORS = "enable_system_sensors"
 CONF_ENABLE_AP_SENSORS = "enable_ap_sensors"
 CONF_ENABLE_ETH_SENSORS = "enable_eth_sensors"
-CONF_ENABLE_SERVICE_CONTROLS = "enable_service_controls"
 CONF_ENABLE_MWAN3_SENSORS = "enable_mwan3_sensors"
+CONF_ENABLE_SERVICE_CONTROLS = "enable_service_controls"
 CONF_ENABLE_NLBWMON_SENSORS = "enable_nlbwmon_sensors"
 
 CONF_ENABLE_DEVICE_KICK_BUTTONS = "enable_device_kick_buttons"
 CONF_ENABLE_REBOOT_BUTTON = "enable_reboot_button"
-CONF_ENABLE_WIRED_TRACKING = "enable_wired_tracking"
 CONF_SELECTED_SERVICES = "selected_services"
 
 # Wired device tracker configuration
@@ -66,6 +63,10 @@ CONF_MWAN3_SENSOR_TIMEOUT = "mwan3_sensor_timeout"
 CONF_SERVICE_TIMEOUT = "service_timeout"
 
 # Default values
+DEFAULT_USE_HTTPS = False
+DEFAULT_PORT_HTTP = 80
+DEFAULT_PORT_HTTPS = 443
+DEFAULT_ENDPOINT = "ubus"
 DEFAULT_ENABLE_QMODEM_SENSORS = True
 DEFAULT_ENABLE_STA_SENSORS = True
 DEFAULT_ENABLE_SYSTEM_SENSORS = True
@@ -73,11 +74,11 @@ DEFAULT_ENABLE_AP_SENSORS = True
 DEFAULT_ENABLE_ETH_SENSORS = True
 DEFAULT_ENABLE_MWAN3_SENSORS = True
 DEFAULT_ENABLE_SERVICE_CONTROLS = False
+DEFAULT_TRACKING_METHOD = "combined"
 DEFAULT_ENABLE_NLBWMON_SENSORS = False
 
 DEFAULT_ENABLE_DEVICE_KICK_BUTTONS = False
 DEFAULT_ENABLE_REBOOT_BUTTON = True
-DEFAULT_ENABLE_WIRED_TRACKING = False
 DEFAULT_SELECTED_SERVICES = []
 DEFAULT_SYSTEM_SENSOR_TIMEOUT = 30
 DEFAULT_QMODEM_SENSOR_TIMEOUT = 120
@@ -88,16 +89,16 @@ DEFAULT_SERVICE_TIMEOUT = 30
 
 # Wired device tracker defaults
 DEFAULT_ENABLE_WIRED_TRACKER = False
-DEFAULT_WIRED_TRACKER_NAME_PRIORITY = "ipv4"
-DEFAULT_WIRED_TRACKER_WHITELIST = []
-DEFAULT_WIRED_TRACKER_INTERFACES = []
+DEFAULT_WIRED_TRACKER_NAME_PRIORITY = "ipv4"  # Options: ipv4, ipv6, mac
+DEFAULT_WIRED_TRACKER_WHITELIST = []  # Empty list means no filtering
+DEFAULT_WIRED_TRACKER_INTERFACES = []  # Empty list means no interface filtering
 DEFAULT_ENABLE_WIRELESS_TRACKERS = False
 DEFAULT_SELECT_ALL_STA = False
-DEFAULT_SELECTED_STA = []
+DEFAULT_SELECTED_STA = []  # Empty list means no devices selected (only matters when select_all_sta is False)
 
 # Consider home configuration
 CONF_CONSIDER_HOME = "consider_home"
-DEFAULT_CONSIDER_HOME = 300
+DEFAULT_CONSIDER_HOME = 300  # seconds before marking device as not_home
 
 # API constants - moved from Ubus/const.py
 API_RPC_CALL = "call"
@@ -118,7 +119,6 @@ API_SUBSYS_UCI = "uci"
 API_SUBSYS_QMODEM = "modem_ctrl"
 API_SUBSYS_MWAN3 = "mwan3"
 API_SUBSYS_RC = "rc"
-API_SUBSYS_LUCI_RPC = "luci-rpc"
 API_SUBSYS_WIRELESS = "network.wireless"
 
 # API methods
@@ -135,7 +135,6 @@ API_METHOD_REBOOT = "reboot"
 API_METHOD_DEL_CLIENT = "del_client"
 API_METHOD_LIST = "list"
 API_METHOD_INIT = "init"
-API_METHOD_GET_HOST_HINTS = "getHostHints"
 API_METHOD_SET = "set"
 API_METHOD_COMMIT = "commit"
 API_METHOD_EXEC = "exec"
@@ -145,7 +144,7 @@ def _build_host_port(target: str, use_https: bool, port: int | None) -> str:
     """Build host:port string, omitting port if it's the default."""
     if port is None:
         return target
-    default_port = DEFAULT_HTTPS_PORT if use_https else DEFAULT_HTTP_PORT
+    default_port = DEFAULT_PORT_HTTPS if use_https else DEFAULT_PORT_HTTP
     if port == default_port:
         return target
     return f"{target}:{port}"
@@ -158,18 +157,7 @@ def build_ubus_url(
     port: int | None = None,
     endpoint: str | None = None,
 ) -> str:
-    """Build the ubus API URL.
-
-    Args:
-        host: The hostname or IP address of the OpenWrt device
-        use_https: Whether to use HTTPS (default: False)
-        ip_address: Optional IP address to use instead of hostname for connection
-        port: Optional custom port (default: 443 for HTTPS, 80 for HTTP)
-        endpoint: Optional ubus endpoint path (default: "ubus")
-
-    Returns:
-        The complete ubus API URL
-    """
+    """Build the ubus URL based on protocol, host, port and endpoint."""
     scheme = "https" if use_https else "http"
     target = ip_address if ip_address else host
     host_port = _build_host_port(target, use_https, port)
@@ -182,17 +170,3 @@ def build_configuration_url(host: str, use_https: bool = False, port: int | None
     scheme = "https" if use_https else "http"
     host_port = _build_host_port(host, use_https, port)
     return f"{scheme}://{host_port}"
-
-
-def get_config_value(entry, key: str, default):
-    """Get configuration value with priority: options > data > default.
-
-    Args:
-        entry: The ConfigEntry object
-        key: The configuration key to look up
-        default: The default value if key is not found
-
-    Returns:
-        The configuration value
-    """
-    return entry.options.get(key, entry.data.get(key, default))

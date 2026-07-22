@@ -1,5 +1,4 @@
 """Client for the OpenWrt ubus API."""
-
 import asyncio
 import json
 import logging
@@ -15,8 +14,7 @@ from .const import (
     API_DEF_VERIFY,
     API_ERROR,
     API_MESSAGE,
-    API_METHOD_LOGIN,
-    API_METHOD_DESTROY,
+    API_SESSION_METHOD_LOGIN,
     API_PARAM_PASSWORD,
     API_PARAM_USERNAME,
     API_RESULT,
@@ -28,10 +26,10 @@ from .const import (
     API_SESSION_METHOD_LIST,
     HTTP_STATUS_OK,
     UBUS_ERROR_SUCCESS,
-    UBUS_ERROR_PERMISSION_DENIED,
-    UBUS_ERROR_NOT_FOUND,
-    UBUS_ERROR_NO_DATA,
+    API_UBUS_RPC_SESSION_EXPIRES,
     _get_error_message,
+    API_SESSION_METHOD_DESTROY,
+    API_SESSION_METHOD_LIST,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -55,6 +53,7 @@ class PreparedCall:
 
 class RPCError(RuntimeError):
     """Custom exception for RPC errors."""
+
     pass
 
 
@@ -71,6 +70,7 @@ class Ubus:
         timeout,
         verify,
     ):
+        """Init OpenWrt ubus API."""
         self.url = url
         self.hostname = hostname
         self.username = username
@@ -89,11 +89,14 @@ class Ubus:
         self.session = session
 
     async def logout(self):
-        try:
-            await self._api_call(API_RPC_CALL, API_SUBSYS_SESSION, API_METHOD_DESTROY)
-        finally:
-            self.session_id = None
-            self.session_expire = 0
+        """Clear the current session ID."""
+        await self._api_call(
+            API_RPC_CALL,
+            API_SUBSYS_SESSION,
+            API_SESSION_METHOD_DESTROY,
+        )
+        self.session_id = None
+        self.session_expire = 0
 
     def _ensure_session(self):
         if self.session is None:
@@ -101,16 +104,26 @@ class Ubus:
             self._session_created_internally = True
 
     async def _ensure_session_is_valid(self):
+        """Ensure session is still valid, serialising reconnect attempts with a lock."""
         if self.session_expire <= (time.time() - 15):
             async with self._connect_lock:
+                # Double-check: another coroutine may have reconnected while we waited
                 if self.session_expire <= (time.time() - 15):
                     await self.connect()
 
-    async def api_call(self, rpc_method, subsystem=None, method=None, params=None) -> dict | list | None:
+    async def api_call(
+        self,
+        rpc_method: str,
+        subsystem: str | None = None,
+        method: str | None = None,
+        params: dict | None = None,
+    ) -> dict | list | None:
+        """Perform API call."""
         await self._ensure_session_is_valid()
         return await self._api_call(rpc_method, subsystem, method, params)
 
     async def batch_call(self, rpcs: list[PreparedCall]) -> list[tuple[str, dict | list | None | Exception]] | None:
+        """Execute multiple API calls in a single batch request."""
         await self._ensure_session_is_valid()
         return await self._batch_call(rpcs)
 
@@ -118,7 +131,14 @@ class Ubus:
         self._ensure_session()
 
         if rpcs[0] and rpcs[0].subsystem != API_SUBSYS_SESSION:
-            rpcs.append(PreparedCall(rpc_method=API_RPC_CALL, subsystem=API_SUBSYS_SESSION, method=API_SESSION_METHOD_LIST, rpc_id="refresh_expiration"))
+            rpcs.append(
+                PreparedCall(  # Session list call for getting the session expiration
+                    rpc_method=API_RPC_CALL,
+                    subsystem=API_SUBSYS_SESSION,
+                    method=API_SESSION_METHOD_LIST,
+                    rpc_id="refresh_expiration",
+                )
+            )
 
         rpc_calls = []
         for rpc in rpcs:
@@ -126,8 +146,16 @@ class Ubus:
             if rpc.rpc_method == API_RPC_CALL:
                 if rpc.method:
                     params.append(rpc.method)
-                params.append(rpc.params if rpc.params else {})
-            rpc_call = {"jsonrpc": API_RPC_VERSION, "method": rpc.rpc_method, "params": params}
+
+                if rpc.params:
+                    params.append(rpc.params)
+                else:
+                    params.append({})
+            rpc_call = {
+                "jsonrpc": API_RPC_VERSION,
+                "method": rpc.rpc_method,
+                "params": params,
+            }
             if rpc.id is not None:
                 rpc_call["id"] = rpc.id
             rpc_calls.append(rpc_call)
@@ -137,8 +165,11 @@ class Ubus:
         while retries_left > 0:
             try:
                 response = await self.session.post(
-                    url=self.url, server_hostname=self.hostname,
-                    data=json.dumps(rpc_calls), timeout=self.timeout, verify_ssl=self.verify,
+                    url=self.url,
+                    server_hostname=self.hostname,
+                    data=json.dumps(rpc_calls),
+                    timeout=self.timeout,
+                    verify_ssl=self.verify,
                 )
                 break
             except aiohttp.ClientConnectionError as e:
@@ -146,8 +177,9 @@ class Ubus:
                 retries_left -= 1
                 if retries_left == 0:
                     raise ConnectionError(f"Failed to connect to API after multiple attempts: {e}")
-                _LOGGER.debug("Retrying API call... (%d retries left)", retries_left)
-                await asyncio.sleep(5 - retries_left)
+                else:
+                    _LOGGER.debug("Retrying API call... (%d retries left)", retries_left)
+                    await asyncio.sleep(5-retries_left)  # Brief pause before retrying
             except Exception as e:
                 _LOGGER.error("Unexpected error when calling API: %s", e)
                 raise ConnectionError(f"Unexpected error when calling API: {e}")
@@ -157,12 +189,20 @@ class Ubus:
 
         responses = await response.json()
 
+        if self.debug_api:
+            _LOGGER.debug(
+                'batch call: status="%s" response="%s"',
+                response.status,
+                responses,
+            )
+
+        # For batch calls, the response is an array of responses
         if isinstance(responses, list):
             results: list[tuple[str, dict | list | None | Exception]] = []
             for i, response in enumerate(responses):
                 result_id = response.get("id", "")
 
-                def _append_result(_result):
+                def _append_result(_result: dict | list | None | Exception):
                     results.append((result_id, _result))
 
                 if API_ERROR in response:
@@ -171,12 +211,36 @@ class Ubus:
                     error_message = response[API_ERROR].get(API_MESSAGE, "Unknown error")
                     error_code = response[API_ERROR].get("code", -1)
 
+                    # Special handling for permission errors
                     if error_code == -32002 or "Access denied" in error_message:
-                        _LOGGER.warning("Permission denied when calling %s.%s: %s [session_id: %s]", subsystem, method, error_message, self.session_id)
-                        _append_result(PermissionError(f"Permission denied for {subsystem}.{method}: {error_message} (code: {error_code})"))
+                        _LOGGER.warning(
+                            "Permission denied when calling %s.%s: %s (code: %d) [session_id: %s]",
+                            subsystem,
+                            method,
+                            error_message,
+                            error_code,
+                            self.session_id,
+                        )
+                        _append_result(
+                            PermissionError(
+                                f"Permission denied for {subsystem}.{method}: {error_message} (code: {error_code})"
+                            )
+                        )
                     else:
-                        _LOGGER.error("API call failed for %s.%s: %s (code: %d) [session_id: %s]", subsystem, method, error_message, error_code, self.session_id)
-                        _append_result(ConnectionError(f"API call failed for {subsystem}.{method}: {error_message} (code: {error_code})"))
+                        # General error handling
+                        _LOGGER.error(
+                            "API call failed for %s.%s: %s (code: %d) [session_id: %s]",
+                            subsystem,
+                            method,
+                            error_message,
+                            error_code,
+                            self.session_id,
+                        )
+                        _append_result(
+                            ConnectionError(
+                                f"API call failed for {subsystem}.{method}: {error_message} (code: {error_code})"
+                            )
+                        )
                 else:
                     result = response[API_RESULT]
                     if rpcs[i].rpc_method == API_RPC_CALL:
@@ -185,14 +249,25 @@ class Ubus:
                             error_msg = _get_error_message(error_code)
                             if len(result) == 2:
                                 if error_code == UBUS_ERROR_SUCCESS:
+                                    # Success - return the data
                                     _append_result(result[1])
                                 else:
-                                    _append_result(RPCError(f"API call failed with error code {error_code} ({error_msg}): {result[1]}"))
+                                    # Error code - log with descriptive message and return None
+                                    _append_result(
+                                        RPCError(
+                                            f"API call failed with error code {error_code} ({error_msg}): {result[1]}"
+                                        )
+                                    )
                             elif len(result) == 1:
                                 if error_code == UBUS_ERROR_SUCCESS:
+                                    # No data returned but success
                                     _append_result(None)
                                 else:
-                                    _append_result(RPCError(f"API call failed with error code {error_code} ({error_msg}): No error message"))
+                                    _append_result(
+                                        RPCError(
+                                            f"API call failed with error code {error_code} ({error_msg}): No error message"
+                                        )
+                                    )
                             else:
                                 _append_result(ConnectionError(f"Unexpected API call result format: {result}"))
                         else:
@@ -206,6 +281,8 @@ class Ubus:
                         raise session_response
                     except (RPCError, PermissionError) as e:
                         _LOGGER.warning("Failed to retrieve session expiration: %s [session_id: %s]", e, self.session_id)
+                elif isinstance(session_response, list):
+                    raise ConnectionError(f"Unexpected session API response format: {session_response}")
                 elif isinstance(session_response, dict):
                     self.session_expire = time.time() + session_response.get("expires", 0)
 
@@ -213,13 +290,39 @@ class Ubus:
         else:
             raise ConnectionError(f"Unexpected API response format: {responses}")
 
-    async def _api_call(self, rpc_method, subsystem=None, method=None, params=None) -> dict | list | None:
-        results = await self._batch_call([PreparedCall(rpc_method=rpc_method, subsystem=subsystem, method=method, params=params)])
+    async def _api_call(
+        self,
+        rpc_method: str,
+        subsystem: str | None = None,
+        method: str | None = None,
+        params: dict | None = None,
+    ) -> dict | list | None:
+        if self.debug_api:
+            _LOGGER.debug(
+                'api call: rpc_method="%s" subsystem="%s" method="%s" params="%s"',
+                rpc_method,
+                subsystem,
+                method,
+                params,
+            )
+
+        results = await self._batch_call(
+            [
+                PreparedCall(
+                    rpc_method=rpc_method,
+                    subsystem=subsystem,
+                    method=method,
+                    params=params,
+                ),
+            ]
+        )
         if results is None:
             return None
+
         _, response = results[0]
         if isinstance(response, Exception):
             raise response
+
         return response
 
     def api_debugging(self, debug_api):
@@ -231,22 +334,34 @@ class Ubus:
         return self.verify
 
     async def connect(self):
+        """Connect to OpenWrt ubus API."""
+        # Destroy the existing session on rpcd before creating a new one to
+        # avoid orphaned sessions accumulating in rpcd memory.
         if self.session_id is not None:
             try:
-                await self._api_call(API_RPC_CALL, API_SUBSYS_SESSION, API_METHOD_DESTROY)
+                await self._api_call(
+                    API_RPC_CALL,
+                    API_SUBSYS_SESSION,
+                    API_SESSION_METHOD_DESTROY,
+                )
             except Exception:
-                pass
+                pass  # Best-effort cleanup; ignore errors (session may already be gone)
 
         self.session_expire = 0
         self.session_id = None
 
-        login = await self._api_call(API_RPC_CALL, API_SUBSYS_SESSION, API_METHOD_LOGIN, {
-            API_PARAM_USERNAME: self.username,
-            API_PARAM_PASSWORD: self.password,
-        })
+        login = await self._api_call(
+            API_RPC_CALL,
+            API_SUBSYS_SESSION,
+            API_SESSION_METHOD_LOGIN,
+            {
+                API_PARAM_USERNAME: self.username,
+                API_PARAM_PASSWORD: self.password,
+            },
+        )
         if login and API_UBUS_RPC_SESSION in login:
             self.session_id = login[API_UBUS_RPC_SESSION]
-            self.session_expire = time.time() + int(login.get(API_UBUS_RPC_SESSION_EXPIRES, 300))
+            self.session_expire = time.time() + int(login[API_UBUS_RPC_SESSION_EXPIRES])
         else:
             self.session_id = None
 

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 import logging
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -18,9 +18,12 @@ from homeassistant.const import (
     UnitOfInformation,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+)
 
 from ..const import (
     DOMAIN,
@@ -127,7 +130,7 @@ async def async_setup_entry(
     # Get timeout from configuration (priority: options > data > default)
     timeout = entry.options.get(
         CONF_SYSTEM_SENSOR_TIMEOUT,
-        entry.data.get(CONF_SYSTEM_SENSOR_TIMEOUT, DEFAULT_SYSTEM_SENSOR_TIMEOUT)
+        entry.data.get(CONF_SYSTEM_SENSOR_TIMEOUT, DEFAULT_SYSTEM_SENSOR_TIMEOUT),
     )
     scan_interval = timedelta(seconds=timeout)
 
@@ -142,6 +145,16 @@ async def async_setup_entry(
 
     # Fetch initial data
     await coordinator.async_config_entry_first_refresh()
+
+    host = coordinator.data_manager.entry.data[CONF_HOST]
+    device_registry = dr.async_get(hass)
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, f"{host}_eth")},
+        name=f"{host} Network Interfaces",
+        manufacturer="OpenWrt",
+        via_device=(DOMAIN, host),  # Link to main router device
+    )
 
     entities = []
 
@@ -206,6 +219,7 @@ class NetworkInterfaceSensor(CoordinatorEntity, SensorEntity):
 
         # Set unique ID
         self._attr_unique_id = f"{self._host}_{device_name}_{description.key}"
+        self._attr_has_entity_name = True
 
         # Set device info - create a device for each network interface
         self._attr_device_info = DeviceInfo(
@@ -213,7 +227,7 @@ class NetworkInterfaceSensor(CoordinatorEntity, SensorEntity):
             name=f"{device_name}",
             manufacturer="OpenWrt",
             model=self._get_device_type(),
-            via_device=(DOMAIN, self._host),  # Link to main router device
+            via_device=(DOMAIN, f"{self._host}_eth"),  # Link to main router device
         )
 
     def _get_device_type(self) -> str:
@@ -242,11 +256,6 @@ class NetworkInterfaceSensor(CoordinatorEntity, SensorEntity):
             return device_data.get("type", "Network Device")
 
     @property
-    def name(self) -> str:
-        """Return the name of the sensor."""
-        return f"{self.device_name} {self.entity_description.name}"
-
-    @property
     def native_value(self) -> Any:
         """Return the state of the sensor."""
         if not self.coordinator.data or "network_devices" not in self.coordinator.data:
@@ -267,8 +276,14 @@ class NetworkInterfaceSensor(CoordinatorEntity, SensorEntity):
         elif self.entity_description.key == "mtu":
             return device_data.get("mtu", 0)
         elif self.entity_description.key in [
-            "rx_bytes", "tx_bytes", "rx_packets", "tx_packets",
-            "rx_errors", "tx_errors", "rx_dropped", "tx_dropped"
+            "rx_bytes",
+            "tx_bytes",
+            "rx_packets",
+            "tx_packets",
+            "rx_errors",
+            "tx_errors",
+            "rx_dropped",
+            "tx_dropped",
         ]:
             stats = device_data.get("statistics", {})
             return stats.get(self.entity_description.key, 0)
@@ -299,35 +314,41 @@ class NetworkInterfaceSensor(CoordinatorEntity, SensorEntity):
         # Add flow control info if available
         if "flow-control" in device_data:
             flow_control = device_data["flow-control"]
-            attrs.update({
-                "flow_control_autoneg": flow_control.get("autoneg", False),
-                "flow_control_supported": flow_control.get("supported", []),
-                "flow_control_advertising": flow_control.get("link-advertising", []),
-                "flow_control_partner_advertising": flow_control.get("link-partner-advertising", []),
-                "flow_control_negotiated": flow_control.get("negotiated", []),
-            })
+            attrs.update(
+                {
+                    "flow_control_autoneg": flow_control.get("autoneg", False),
+                    "flow_control_supported": flow_control.get("supported", []),
+                    "flow_control_advertising": flow_control.get("link-advertising", []),
+                    "flow_control_partner_advertising": flow_control.get("link-partner-advertising", []),
+                    "flow_control_negotiated": flow_control.get("negotiated", []),
+                }
+            )
 
         # Add bridge info if it's a bridge
         if device_data.get("type") == "bridge":
             bridge_attrs = device_data.get("bridge-attributes", {})
-            attrs.update({
-                "bridge_stp": bridge_attrs.get("stp", False),
-                "bridge_priority": bridge_attrs.get("priority", 0),
-                "bridge_ageing_time": bridge_attrs.get("ageing_time", 0),
-                "bridge_hello_time": bridge_attrs.get("hello_time", 1),
-                "bridge_max_age": bridge_attrs.get("max_age", 10),
-                "bridge_forward_delay": bridge_attrs.get("forward_delay", 8),
-                "bridge_igmp_snooping": bridge_attrs.get("igmp_snooping", False),
-                "bridge_members": device_data.get("bridge-members", []),
-            })
+            attrs.update(
+                {
+                    "bridge_stp": bridge_attrs.get("stp", False),
+                    "bridge_priority": bridge_attrs.get("priority", 0),
+                    "bridge_ageing_time": bridge_attrs.get("ageing_time", 0),
+                    "bridge_hello_time": bridge_attrs.get("hello_time", 1),
+                    "bridge_max_age": bridge_attrs.get("max_age", 10),
+                    "bridge_forward_delay": bridge_attrs.get("forward_delay", 8),
+                    "bridge_igmp_snooping": bridge_attrs.get("igmp_snooping", False),
+                    "bridge_members": device_data.get("bridge-members", []),
+                }
+            )
 
         # Add link info if available
         if "link-advertising" in device_data:
-            attrs.update({
-                "link_advertising": device_data.get("link-advertising", []),
-                "link_partner_advertising": device_data.get("link-partner-advertising", []),
-                "link_supported": device_data.get("link-supported", []),
-            })
+            attrs.update(
+                {
+                    "link_advertising": device_data.get("link-advertising", []),
+                    "link_partner_advertising": device_data.get("link-partner-advertising", []),
+                    "link_supported": device_data.get("link-supported", []),
+                }
+            )
 
         # Add conduit for DSA ports
         if "conduit" in device_data:

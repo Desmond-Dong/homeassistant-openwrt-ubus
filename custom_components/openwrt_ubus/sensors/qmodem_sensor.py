@@ -30,8 +30,12 @@ from homeassistant.helpers.update_coordinator import (
 
 from ..const import (
     DOMAIN,
+    CONF_USE_HTTPS,
+    CONF_PORT,
+    DEFAULT_USE_HTTPS,
     CONF_QMODEM_SENSOR_TIMEOUT,
     DEFAULT_QMODEM_SENSOR_TIMEOUT,
+    build_configuration_url,
 )
 from ..shared_data_manager import SharedDataUpdateCoordinator
 
@@ -207,7 +211,7 @@ async def async_setup_entry(
     # Get timeout from configuration (priority: options > data > default)
     timeout = entry.options.get(
         CONF_QMODEM_SENSOR_TIMEOUT,
-        entry.data.get(CONF_QMODEM_SENSOR_TIMEOUT, DEFAULT_QMODEM_SENSOR_TIMEOUT)
+        entry.data.get(CONF_QMODEM_SENSOR_TIMEOUT, DEFAULT_QMODEM_SENSOR_TIMEOUT),
     )
     scan_interval = timedelta(seconds=timeout)
 
@@ -224,10 +228,7 @@ async def async_setup_entry(
     await coordinator.async_config_entry_first_refresh()
 
     # Create QModem sensor entities
-    entities = [
-        QModemSensor(coordinator, description)
-        for description in SENSOR_DESCRIPTIONS
-    ]
+    entities = [QModemSensor(coordinator, description) for description in SENSOR_DESCRIPTIONS]
     async_add_entities(entities, True)
     _LOGGER.info("QModem entities created - modem_ctrl is available")
 
@@ -236,6 +237,11 @@ async def async_setup_entry(
 
 class QModemSensor(CoordinatorEntity, SensorEntity):
     """Representation of a QModem sensor."""
+
+    # raw_data carries the full modem dump and changes every poll. Keep it
+    # live for debugging but never record it, otherwise it forces a new state
+    # row + unique attribute blob every update.
+    _unrecorded_attributes = frozenset({"raw_data"})
 
     def __init__(
         self,
@@ -269,8 +275,8 @@ class QModemSensor(CoordinatorEntity, SensorEntity):
                 revision_value = self._extract_qmodem_value(qmodem_info, "qmodem_revision")
                 if revision_value:
                     model = f"QModem {revision_value}"
-            except Exception as exc:
-                _LOGGER.debug("Error extracting QModem device info: %s", exc)
+            except Exception:
+                pass  # Use default values if extraction fails
 
         # Create a separate device for QModem
         return DeviceInfo(
@@ -278,7 +284,11 @@ class QModemSensor(CoordinatorEntity, SensorEntity):
             name=f"QModem ({self._host})",
             manufacturer=manufacturer,
             model=model,
-            configuration_url=f"http://{self._host}",
+            configuration_url=build_configuration_url(
+                self._host,
+                self.coordinator.data_manager.entry.data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS),
+                self.coordinator.data_manager.entry.data.get(CONF_PORT),
+            ),
             via_device=(DOMAIN, self._host),
         )
 
@@ -299,7 +309,11 @@ class QModemSensor(CoordinatorEntity, SensorEntity):
             value = self._extract_qmodem_value(qmodem_info, self.entity_description.key)
             return value if value is not None else "no_data"
         except Exception as exc:
-            _LOGGER.error("Error extracting qmodem value for %s: %s", self.entity_description.key, exc)
+            _LOGGER.error(
+                "Error extracting qmodem value for %s: %s",
+                self.entity_description.key,
+                exc,
+            )
             _LOGGER.debug("QModem data causing error: %s", qmodem_info)
             return "error"
 
@@ -346,32 +360,41 @@ class QModemSensor(CoordinatorEntity, SensorEntity):
                         return result
                 elif item_type == "progress_bar" and class_origin == "Cell Information":
                     # Store signal values with context
-                    if current_context == "LTE" and item_key in ["RSRP", "RSRQ", "RSSI", "SINR"]:
+                    if current_context == "LTE" and item_key in [
+                        "RSRP",
+                        "RSRQ",
+                        "RSSI",
+                        "SINR",
+                    ]:
                         lte_signals[item_key] = value
-                    elif current_context == "NR5G" and item_key in ["RSRP", "RSRQ", "SINR"]:
+                    elif current_context == "NR5G" and item_key in [
+                        "RSRP",
+                        "RSRQ",
+                        "SINR",
+                    ]:
                         nr5g_signals[item_key] = value
 
         # Check if we found the requested signal value
         if key == "qmodem_lte_rsrp" and "RSRP" in lte_signals:
-            numeric_match = re.search(r'(-?\d+)', str(lte_signals["RSRP"]))
+            numeric_match = re.search(r"(-?\d+)", str(lte_signals["RSRP"]))
             return int(numeric_match.group(1)) if numeric_match else None
         elif key == "qmodem_lte_rsrq" and "RSRQ" in lte_signals:
-            numeric_match = re.search(r'(-?\d+)', str(lte_signals["RSRQ"]))
+            numeric_match = re.search(r"(-?\d+)", str(lte_signals["RSRQ"]))
             return int(numeric_match.group(1)) if numeric_match else None
         elif key == "qmodem_lte_rssi" and "RSSI" in lte_signals:
-            numeric_match = re.search(r'(-?\d+)', str(lte_signals["RSSI"]))
+            numeric_match = re.search(r"(-?\d+)", str(lte_signals["RSSI"]))
             return int(numeric_match.group(1)) if numeric_match else None
         elif key == "qmodem_lte_sinr" and "SINR" in lte_signals:
-            numeric_match = re.search(r'(\d+)', str(lte_signals["SINR"]))
+            numeric_match = re.search(r"(\d+)", str(lte_signals["SINR"]))
             return int(numeric_match.group(1)) if numeric_match else None
         elif key == "qmodem_nr5g_rsrp" and "RSRP" in nr5g_signals:
-            numeric_match = re.search(r'(-?\d+)', str(nr5g_signals["RSRP"]))
+            numeric_match = re.search(r"(-?\d+)", str(nr5g_signals["RSRP"]))
             return int(numeric_match.group(1)) if numeric_match else None
         elif key == "qmodem_nr5g_rsrq" and "RSRQ" in nr5g_signals:
-            numeric_match = re.search(r'(-?\d+)', str(nr5g_signals["RSRQ"]))
+            numeric_match = re.search(r"(-?\d+)", str(nr5g_signals["RSRQ"]))
             return int(numeric_match.group(1)) if numeric_match else None
         elif key == "qmodem_nr5g_sinr" and "SINR" in nr5g_signals:
-            numeric_match = re.search(r'(\d+)', str(nr5g_signals["SINR"]))
+            numeric_match = re.search(r"(\d+)", str(nr5g_signals["SINR"]))
             return int(numeric_match.group(1)) if numeric_match else None
 
         _LOGGER.debug("No matching value found for key %s in qmodem data", key)
@@ -391,11 +414,11 @@ class QModemSensor(CoordinatorEntity, SensorEntity):
         if item_key in key_mapping and key_mapping[item_key] == target_key:
             if target_key == "qmodem_temperature":
                 # Extract numeric value from temperature string (e.g., "71°C")
-                numeric_match = re.search(r'(\d+)', str(value))
+                numeric_match = re.search(r"(\d+)", str(value))
                 return int(numeric_match.group(1)) if numeric_match else None
             elif target_key == "qmodem_voltage":
                 # Extract numeric value from voltage string (e.g., "3980 mV")
-                numeric_match = re.search(r'(\d+)', str(value))
+                numeric_match = re.search(r"(\d+)", str(value))
                 return int(numeric_match.group(1)) if numeric_match else None
             else:
                 return str(value) if value else None
@@ -414,7 +437,7 @@ class QModemSensor(CoordinatorEntity, SensorEntity):
 
         if item_key in key_mapping and key_mapping[item_key] == target_key:
             # Clean up value - remove newlines and extra spaces
-            clean_value = str(value).replace('\n', ' ').strip() if value else None
+            clean_value = str(value).replace("\n", " ").strip() if value else None
             return clean_value if clean_value else None
         return None
 
@@ -452,7 +475,7 @@ class QModemSensor(CoordinatorEntity, SensorEntity):
 
         # Add coordinator status
         attributes["coordinator_last_update_success"] = self.coordinator.last_update_success
-        if hasattr(self.coordinator, 'last_exception') and self.coordinator.last_exception:
+        if hasattr(self.coordinator, "last_exception") and self.coordinator.last_exception:
             attributes["last_error"] = str(self.coordinator.last_exception)
 
         return attributes

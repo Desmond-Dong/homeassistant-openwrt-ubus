@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import timedelta
-import logging
 from typing import Any, Callable
 
 from homeassistant.components.sensor import (
@@ -21,9 +21,9 @@ from homeassistant.const import (
     PERCENTAGE,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
 )
@@ -43,6 +43,7 @@ SCAN_INTERVAL = timedelta(seconds=60)  # AP info doesn't change frequently
 @dataclass
 class SensorValueMapping:
     """Data class for sensor value mapping configuration."""
+
     data_keys: list[str | tuple]
     convert_function: Callable
     default_value: Any = None
@@ -51,6 +52,7 @@ class SensorValueMapping:
 @dataclass
 class AttributeMapping:
     """Data class for extra attribute mapping configuration."""
+
     data_keys: list[str | tuple]
     convert_function: Callable
 
@@ -72,6 +74,7 @@ def _get_simple_value(ap_data: dict, keys: list[str]) -> Any:
 
 def _get_nested_value(ap_data: dict, keys: list[tuple]) -> Any:
     """Get value from nested dictionary using tuple keys for nested access."""
+
     def get_value(data: dict, key_path: tuple) -> Any:
         """Recursively get value from nested dictionary using tuple as path."""
         if not isinstance(data, dict) or not key_path:
@@ -252,6 +255,14 @@ SENSOR_DESCRIPTIONS = [
         icon="mdi:flag",
         entity_category=None,
     ),
+    SensorEntityDescription(
+        key="clients",
+        name="Connected Clients",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="clients",
+        icon="mdi:account-network",
+        entity_category=None,
+    ),
 ]
 
 
@@ -269,7 +280,7 @@ async def async_setup_entry(
     # Get timeout from configuration (priority: options > data > default)
     timeout = entry.options.get(
         CONF_AP_SENSOR_TIMEOUT,
-        entry.data.get(CONF_AP_SENSOR_TIMEOUT, DEFAULT_AP_SENSOR_TIMEOUT)
+        entry.data.get(CONF_AP_SENSOR_TIMEOUT, DEFAULT_AP_SENSOR_TIMEOUT),
     )
     scan_interval = timedelta(seconds=timeout)
 
@@ -277,7 +288,7 @@ async def async_setup_entry(
     coordinator = SharedDataUpdateCoordinator(
         hass,
         data_manager,
-        ["ap_info"],  # Data types this coordinator needs
+        ["ap_info", "device_statistics"],  # Data types this coordinator needs
         f"{DOMAIN}_ap_{entry.data[CONF_HOST]}",
         scan_interval,
     )
@@ -309,40 +320,47 @@ async def async_setup_entry(
                 device_sensors_to_add = []
                 for description in SENSOR_DESCRIPTIONS:
                     unique_id = f"{entry.data[CONF_HOST]}_ap_{ap_device}_{description.key}"
-                    existing_entity_id = entity_registry.async_get_entity_id(
-                        "sensor", DOMAIN, unique_id
-                    )
+                    existing_entity_id = entity_registry.async_get_entity_id("sensor", DOMAIN, unique_id)
 
                     if existing_entity_id:
                         _LOGGER.debug(
                             "AP sensor entity %s already exists with entity_id %s, skipping creation",
-                            unique_id, existing_entity_id
+                            unique_id,
+                            existing_entity_id,
                         )
                         continue
 
                     # Check if sensor has required data
-                    ap_data = ap_info_data.get(ap_device, {})
-                    mapping = SENSOR_VALUE_MAPPING.get(description.key)
-                    if mapping and _has_required_data(ap_data, mapping.data_keys):
+                    if description.key == "clients":
+                        # clients sensor doesn't need data from ap_info
                         device_sensors_to_add.append(description)
+                    else:
+                        ap_data = ap_info_data.get(ap_device, {})
+                        mapping = SENSOR_VALUE_MAPPING.get(description.key)
+                        if mapping and _has_required_data(ap_data, mapping.data_keys):
+                            device_sensors_to_add.append(description)
 
                 # Only add sensors that don't already exist and have data
                 if device_sensors_to_add:
-                    new_entities.extend([
-                        ApSensor(coordinator, description, ap_device)
-                        for description in device_sensors_to_add
-                    ])
+                    new_entities.extend(
+                        [ApSensor(coordinator, description, ap_device) for description in device_sensors_to_add]
+                    )
 
                 coordinator.known_devices.add(ap_device)
 
             # Add new entities only if there are any
             if new_entities:
                 async_add_entities(new_entities, True)
-                _LOGGER.info("Created %d AP sensor entities for %d new devices",
-                             len(new_entities), len(new_devices))
+                _LOGGER.info(
+                    "Created %d AP sensor entities for %d new devices",
+                    len(new_entities),
+                    len(new_devices),
+                )
             else:
-                _LOGGER.debug("No new AP sensor entities to create for %d devices (all already exist or no data)",
-                              len(new_devices))
+                _LOGGER.debug(
+                    "No new AP sensor entities to create for %d devices (all already exist or no data)",
+                    len(new_devices),
+                )
 
         # Handle removed devices - remove entities for devices that no longer exist
         removed_devices = coordinator.known_devices - current_devices
@@ -351,32 +369,23 @@ async def async_setup_entry(
             entity_registry = er.async_get(hass)
 
             for ap_device in removed_devices:
-                for description in SENSOR_DESCRIPTIONS:
-                    unique_id = f"{entry.data[CONF_HOST]}_ap_{ap_device}_{description.key}"
-                    entity_id = entity_registry.async_get_entity_id("sensor", DOMAIN, unique_id)
-                    if entity_id:
-                        entity_registry.async_remove(entity_id)
-                        _LOGGER.debug("Removed AP sensor entity %s", entity_id)
-
                 coordinator.known_devices.discard(ap_device)
-
-        # Handle entities for existing devices that no longer have required data
-        entity_registry = er.async_get(hass)
-        for ap_device in current_devices & coordinator.known_devices:
-            ap_data = ap_info_data[ap_device]
-            for description in SENSOR_DESCRIPTIONS:
-                unique_id = f"{entry.data[CONF_HOST]}_ap_{ap_device}_{description.key}"
-                entity_id = entity_registry.async_get_entity_id("sensor", DOMAIN, unique_id)
-
-                if entity_id:
-                    # Check if entity should be removed due to missing data
-                    mapping = SENSOR_VALUE_MAPPING.get(description.key)
-                    if mapping and not _has_required_data(ap_data, mapping.data_keys):
-                        entity_registry.async_remove(entity_id)
-                        _LOGGER.debug("Removed AP sensor entity %s due to missing data", entity_id)
 
     # Perform first refresh
     await coordinator.async_config_entry_first_refresh()
+
+    host = coordinator.data_manager.entry.data[CONF_HOST]
+    device_registry = dr.async_get(hass)
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, f"{host}_ap")},
+        name=f"{host} Access Points",
+        manufacturer="OpenWrt",
+        via_device=(DOMAIN, host),  # Link to main router device
+    )
+
+    # Add the single "Total Wireless Clients" sensor on the hub device
+    async_add_entities([TotalWirelessClientsSensor(coordinator)], True)
 
     # Add initial sensors for any devices already discovered
     initial_entities = []
@@ -388,11 +397,12 @@ async def async_setup_entry(
 
             # Only add sensors that have the required data
             for description in SENSOR_DESCRIPTIONS:
-                mapping = SENSOR_VALUE_MAPPING.get(description.key)
-                if mapping and _has_required_data(ap_data, mapping.data_keys):
-                    initial_entities.append(
-                        ApSensor(coordinator, description, ap_device)
-                    )
+                if description.key == "clients":
+                    initial_entities.append(ApSensor(coordinator, description, ap_device))
+                else:
+                    mapping = SENSOR_VALUE_MAPPING.get(description.key)
+                    if mapping and _has_required_data(ap_data, mapping.data_keys):
+                        initial_entities.append(ApSensor(coordinator, description, ap_device))
 
     # Add initial entities if any
     if initial_entities:
@@ -434,8 +444,11 @@ class ApSensor(CoordinatorEntity, SensorEntity):
         """Return device info to link this sensor to a device."""
         # Get device name from AP data if available
         device_name = f"AP {self.ap_device}"
-        if (self.coordinator.data and "ap_info" in self.coordinator.data
-                and self.ap_device in self.coordinator.data["ap_info"]):
+        if (
+            self.coordinator.data
+            and "ap_info" in self.coordinator.data
+            and self.ap_device in self.coordinator.data["ap_info"]
+        ):
             ap_data = self.coordinator.data["ap_info"][self.ap_device]
             if "device_name" in ap_data:
                 device_name = ap_data["device_name"]
@@ -446,12 +459,19 @@ class ApSensor(CoordinatorEntity, SensorEntity):
             name=device_name,
             manufacturer="OpenWrt",
             model="Access Point",
-            via_device=(DOMAIN, self._host),
+            via_device=(DOMAIN, f"{self._host}_ap"),
         )
 
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
+        if self.entity_description.key == "clients":
+            return (
+                self.coordinator.last_update_success
+                and self.coordinator.data is not None
+                and "device_statistics" in self.coordinator.data
+            )
+
         if not (
             self.coordinator.last_update_success
             and self.coordinator.data is not None
@@ -472,7 +492,24 @@ class ApSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self) -> str | int | float | None:
         """Return the state of the sensor."""
-        if not self.coordinator.data or "ap_info" not in self.coordinator.data:
+        if not self.coordinator.data:
+            return None
+
+        if self.entity_description.key == "clients":
+            if "device_statistics" not in self.coordinator.data:
+                return 0
+            count = 0
+            dev_stats = self.coordinator.data["device_statistics"]
+            for mac, info in dev_stats.items():
+                ap_dev = info.get("ap_device", "")
+                if ap_dev.startswith("hostapd."):
+                    ap_dev = ap_dev.replace("hostapd.", "", 1)
+                
+                if ap_dev == self.ap_device:
+                    count += 1
+            return count
+
+        if "ap_info" not in self.coordinator.data:
             return None
 
         ap_info_data = self.coordinator.data["ap_info"]
@@ -524,7 +561,74 @@ class ApSensor(CoordinatorEntity, SensorEntity):
                     if value is not None:  # Only add attribute if value is not None
                         attributes[attr_key] = value
             except (KeyError, TypeError, ValueError) as exc:
-                _LOGGER.debug("Error getting attribute %s for %s: %s", attr_key, self.ap_device, exc)
+                _LOGGER.debug(
+                    "Error getting attribute %s for %s: %s",
+                    attr_key,
+                    self.ap_device,
+                    exc,
+                )
                 continue
 
         return attributes
+
+
+class TotalWirelessClientsSensor(CoordinatorEntity, SensorEntity):
+    """A single sensor on the 'Access Points' hub device showing the total
+    number of connected wireless clients across all individual APs."""
+
+    _attr_name = "Total Wireless Clients"
+    _attr_icon = "mdi:account-multiple"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "clients"
+    _attr_has_entity_name = True
+
+    def __init__(self, coordinator: SharedDataUpdateCoordinator) -> None:
+        """Initialise the total clients sensor."""
+        super().__init__(coordinator)
+        self._host = coordinator.data_manager.entry.data[CONF_HOST]
+        self._attr_unique_id = f"{self._host}_ap_total_clients"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return the hub 'Access Points' device so the entity appears there."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._host}_ap")},
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return True when coordinator has fresh data."""
+        return (
+            self.coordinator.last_update_success
+            and self.coordinator.data is not None
+            and "device_statistics" in self.coordinator.data
+        )
+
+    @property
+    def native_value(self) -> int:
+        """Return the total number of connected wireless clients."""
+        if not self.coordinator.data or "device_statistics" not in self.coordinator.data:
+            return 0
+        return sum(
+            1
+            for info in self.coordinator.data["device_statistics"].values()
+            if info.get("ap_device")
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return per-AP client counts as attributes."""
+        if not self.coordinator.data or "device_statistics" not in self.coordinator.data:
+            return {}
+
+        per_ap: dict[str, int] = {}
+        for info in self.coordinator.data["device_statistics"].values():
+            ap_dev = info.get("ap_device", "")
+            if not ap_dev:
+                continue
+            # Normalise hostapd.<ifname> -> <ifname>
+            if ap_dev.startswith("hostapd."):
+                ap_dev = ap_dev[len("hostapd."):]
+            per_ap[ap_dev] = per_ap.get(ap_dev, 0) + 1
+
+        return {"clients_per_ap": per_ap, "router_host": self._host}
