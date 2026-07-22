@@ -9,20 +9,16 @@ PLATFORMS = [Platform.DEVICE_TRACKER, Platform.SENSOR, Platform.SWITCH, Platform
 CONF_USE_HTTPS = "use_https"
 CONF_PORT = "port"
 CONF_ENDPOINT = "endpoint"
-CONF_DHCP_SOFTWARE = "dhcp_software"
-CONF_WIRELESS_SOFTWARE = "wireless_software"
-CONF_USE_HTTPS = "use_https"
 CONF_VERIFY_SSL = "verify_ssl"
 CONF_CERT_PATH = "cert_path"
-CONF_PORT = "port"
-CONF_ENDPOINT = "endpoint"
 CONF_TRACKING_METHOD = "tracking_method"
+CONF_DHCP_SOFTWARE = "dhcp_software"
+CONF_WIRELESS_SOFTWARE = "wireless_software"
 DEFAULT_DHCP_SOFTWARE = "dnsmasq"
 DEFAULT_WIRELESS_SOFTWARE = "iwinfo"
 DHCP_SOFTWARES = ["dnsmasq", "odhcpd", "ethers", "none"]
 WIRELESS_SOFTWARES = ["hostapd", "iwinfo", "none"]
 TRACKING_METHODS = ["uniqueid", "combined"]
-CONF_TRACKING_METHOD = "tracking_method"
 
 # Device kick constants
 DEFAULT_BAN_TIME_MS = 60000  # Default ban time in milliseconds (60 seconds)
@@ -48,6 +44,10 @@ CONF_ENABLE_WIRED_TRACKER = "enable_wired_tracker"
 CONF_WIRED_TRACKER_NAME_PRIORITY = "wired_tracker_name_priority"
 CONF_WIRED_TRACKER_WHITELIST = "wired_tracker_whitelist"
 CONF_WIRED_TRACKER_INTERFACES = "wired_tracker_interfaces"
+# Topology panel configuration
+CONF_ENABLE_TOPOLOGY_PANEL = "enable_topology_panel"
+DEFAULT_ENABLE_TOPOLOGY_PANEL = True
+
 # Wireless device tracker configuration
 CONF_ENABLE_WIRELESS_TRACKERS = "enable_wireless_trackers"
 CONF_WIRELESS_TRACKER_WHITELIST = "wireless_tracker_whitelist"

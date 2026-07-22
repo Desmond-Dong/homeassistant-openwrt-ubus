@@ -14,7 +14,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 import voluptuous as vol
 
-from .const import DOMAIN
+from .const import (
+    CONF_ENABLE_TOPOLOGY_PANEL,
+    DEFAULT_ENABLE_TOPOLOGY_PANEL,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,7 +31,7 @@ TOPOLOGY_OFFLINE_GRACE_SECONDS = 90
 
 
 async def async_setup_topology(hass: HomeAssistant) -> None:
-    """Register topology panel, static assets, and websocket command."""
+    """Register static assets and websocket command (called once at startup)."""
     hass.data.setdefault(DOMAIN, {})
     if hass.data[DOMAIN].get("topology_registered"):
         return
@@ -37,15 +41,38 @@ async def async_setup_topology(hass: HomeAssistant) -> None:
         [StaticPathConfig(TOPOLOGY_STATIC_URL, str(static_dir), cache_headers=False)]
     )
     websocket_api.async_register_command(hass, websocket_get_topology)
-    await panel_custom.async_register_panel(
-        hass,
-        frontend_url_path=TOPOLOGY_PANEL_PATH,
-        webcomponent_name=TOPOLOGY_WEBCOMPONENT,
-        module_url=TOPOLOGY_PANEL_MODULE_URL,
-        require_admin=True,
-        config={"domain": DOMAIN, "title": "OpenWrt Topology"},
-    )
     hass.data[DOMAIN]["topology_registered"] = True
+
+
+async def async_register_topology_panel(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Register or update the topology panel with per-entry sidebar setting."""
+    if hass.data[DOMAIN].get("topology_panel_registered"):
+        return
+
+    # Remove stale panel if left over from a previous unload
+    hass.data.setdefault("frontend_panels", {}).pop(TOPOLOGY_PANEL_PATH, None)
+
+    show_in_sidebar = entry.options.get(
+        CONF_ENABLE_TOPOLOGY_PANEL,
+        entry.data.get(CONF_ENABLE_TOPOLOGY_PANEL, DEFAULT_ENABLE_TOPOLOGY_PANEL),
+    )
+
+    kwargs = {
+        "frontend_url_path": TOPOLOGY_PANEL_PATH,
+        "webcomponent_name": TOPOLOGY_WEBCOMPONENT,
+        "module_url": TOPOLOGY_PANEL_MODULE_URL,
+        "require_admin": True,
+        "config": {"domain": DOMAIN, "title": "OpenWrt Topology"},
+    }
+    if show_in_sidebar:
+        kwargs["sidebar_title"] = "OpenWrt Topology"
+        kwargs["sidebar_icon"] = "mdi:graph"
+
+    try:
+        await panel_custom.async_register_panel(hass, **kwargs)
+    except Exception as exc:
+        _LOGGER.warning("Failed to register topology panel: %s", exc)
+    hass.data[DOMAIN]["topology_panel_registered"] = True
 
 
 def _device_id_for_identifier(

@@ -34,11 +34,13 @@ from .const import (
     CONF_WIRELESS_SOFTWARE,
     CONF_TRACKING_METHOD,
     CONF_ENABLE_WIRED_TRACKER,
+    CONF_ENABLE_WIRED_TRACKING,
     DEFAULT_CONSIDER_HOME,
     DEFAULT_DHCP_SOFTWARE,
     DEFAULT_WIRELESS_SOFTWARE,
     DEFAULT_TRACKING_METHOD,
     DEFAULT_ENABLE_WIRED_TRACKER,
+    DEFAULT_ENABLE_WIRED_TRACKING,
     CONF_ENABLE_WIRELESS_TRACKERS,
     CONF_WIRELESS_TRACKER_WHITELIST,
     DEFAULT_ENABLE_WIRELESS_TRACKERS,
@@ -56,13 +58,6 @@ SCAN_INTERVAL = timedelta(seconds=30)
 CONNECTION_TYPE_GRACE_PERIOD = timedelta(minutes=3)
 RESTORED_WIRELESS_GRACE_PERIOD = timedelta(minutes=10)
 OFFLINE_GRACE_PERIOD = timedelta(seconds=90)
-
-
-def _generate_unique_id(host: str, mac_address: str, tracking_method: str) -> str:
-    """Generate unique id based on tracking method."""
-    if tracking_method == "uniqueid":
-        return mac_address
-    return f"{host}_{mac_address}"
 
 
 def _generate_unique_id(host: str, mac_address: str, tracking_method: str) -> str:
@@ -214,10 +209,16 @@ async def async_setup_entry(
     data_manager_key = f"data_manager_{entry.entry_id}"
     data_manager = hass.data[DOMAIN][data_manager_key]
 
-    # Check if wired tracker is enabled
+    # Check if wired tracker is enabled (support both old and new key)
     enable_wired_tracker = entry.options.get(
-        CONF_ENABLE_WIRED_TRACKER,
-        entry.data.get(CONF_ENABLE_WIRED_TRACKER, DEFAULT_ENABLE_WIRED_TRACKER),
+        CONF_ENABLE_WIRED_TRACKING,
+        entry.options.get(
+            CONF_ENABLE_WIRED_TRACKER,
+            entry.data.get(
+                CONF_ENABLE_WIRED_TRACKING,
+                entry.data.get(CONF_ENABLE_WIRED_TRACKER, DEFAULT_ENABLE_WIRED_TRACKING),
+            ),
+        ),
     )
 
     # Check if wireless tracker is enabled

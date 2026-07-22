@@ -26,7 +26,6 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from . import API_DEF_TIMEOUT
-from .Ubus import Ubus
 from .Ubus.const import API_RPC_CALL
 from .extended_ubus import ExtendedUbus
 from .const import (
@@ -44,10 +43,10 @@ from .const import (
     CONF_ENABLE_MWAN3_SENSORS,
     CONF_ENABLE_NLBWMON_SENSORS,
     CONF_ENABLE_REBOOT_BUTTON,
+    CONF_ENABLE_TOPOLOGY_PANEL,
     CONF_ENABLE_SERVICE_CONTROLS,
     CONF_ENABLE_DEVICE_KICK_BUTTONS,
     CONF_ENABLE_WIRED_TRACKING,
-    CONF_ENABLE_WIRED_TRACKER,
     CONF_WIRED_TRACKER_NAME_PRIORITY,
     CONF_WIRED_TRACKER_WHITELIST,
     CONF_WIRED_TRACKER_INTERFACES,
@@ -81,10 +80,10 @@ from .const import (
     DEFAULT_ENABLE_MWAN3_SENSORS,
     DEFAULT_ENABLE_NLBWMON_SENSORS,
     DEFAULT_ENABLE_REBOOT_BUTTON,
+    DEFAULT_ENABLE_TOPOLOGY_PANEL,
     DEFAULT_ENABLE_SERVICE_CONTROLS,
     DEFAULT_ENABLE_DEVICE_KICK_BUTTONS,
     DEFAULT_ENABLE_WIRED_TRACKING,
-    DEFAULT_ENABLE_WIRED_TRACKER,
     DEFAULT_WIRED_TRACKER_NAME_PRIORITY,
     DEFAULT_WIRED_TRACKER_WHITELIST,
     DEFAULT_WIRED_TRACKER_INTERFACES,
@@ -109,8 +108,6 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-TOPOLOGY_PANEL_PATH = "/openwrt-ubus-topology"
 
 # Step 1: Connection configuration
 STEP_USER_DATA_SCHEMA = vol.Schema(
@@ -142,7 +139,7 @@ STEP_SENSORS_DATA_SCHEMA = vol.Schema(
         vol.Optional(CONF_ENABLE_SERVICE_CONTROLS, default=DEFAULT_ENABLE_SERVICE_CONTROLS): bool,
         vol.Optional(CONF_ENABLE_DEVICE_KICK_BUTTONS, default=DEFAULT_ENABLE_DEVICE_KICK_BUTTONS): bool,
         vol.Optional(CONF_ENABLE_WIRELESS_TRACKERS, default=DEFAULT_ENABLE_WIRELESS_TRACKERS): bool,
-        vol.Optional(CONF_ENABLE_WIRED_TRACKER, default=DEFAULT_ENABLE_WIRED_TRACKER): bool,
+        vol.Optional(CONF_ENABLE_WIRED_TRACKING, default=DEFAULT_ENABLE_WIRED_TRACKING): bool,
     }
 )
 
@@ -389,7 +386,7 @@ class OpenwrtUbusConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_wireless_tracker_config()
 
             # If wired tracker is enabled, proceed to wired tracker configuration
-            if user_input.get(CONF_ENABLE_WIRED_TRACKER, False):
+            if user_input.get(CONF_ENABLE_WIRED_TRACKING, False):
                 return await self.async_step_wired_tracker_config()
 
             # If service controls are enabled, proceed to services selection
@@ -410,7 +407,7 @@ class OpenwrtUbusConfigFlow(ConfigFlow, domain=DOMAIN):
             self._sensor_data.update(user_input)
 
             # If wired tracker is enabled, proceed to wired tracker configuration
-            if self._sensor_data.get(CONF_ENABLE_WIRED_TRACKER, False):
+            if self._sensor_data.get(CONF_ENABLE_WIRED_TRACKING, False):
                 return await self.async_step_wired_tracker_config()
 
             # If service controls are enabled, proceed to services selection
@@ -493,7 +490,7 @@ class OpenwrtUbusConfigFlow(ConfigFlow, domain=DOMAIN):
                     ]
 
             # If wired tracker is enabled, proceed to wired tracker configuration
-            if self._sensor_data.get(CONF_ENABLE_WIRED_TRACKER, False):
+            if self._sensor_data.get(CONF_ENABLE_WIRED_TRACKING, False):
                 return await self.async_step_wired_tracker_config()
 
             # If service controls are enabled, proceed to services selection
@@ -605,12 +602,13 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
         self._temp_data: dict[str, Any] = {}
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Manage the options."""
-        if user_input is not None:
-            # Check if we need to refresh services
-            if user_input.get("refresh_services", False):
-                return await self.async_step_services()
+        """Show the options menu."""
+        menu_options = ["configure", "services"]
+        return self.async_show_menu(step_id="init", menu_options=menu_options)
 
+    async def async_step_configure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Configure the integration options."""
+        if user_input is not None:
             # Process wireless tracker whitelist string into list
             if CONF_WIRELESS_TRACKER_WHITELIST in user_input:
                 whitelist_str = user_input.get(CONF_WIRELESS_TRACKER_WHITELIST, "")
@@ -625,7 +623,6 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
             if CONF_WIRED_TRACKER_WHITELIST in user_input:
                 whitelist_str = user_input.get(CONF_WIRED_TRACKER_WHITELIST, "")
                 if whitelist_str:
-                    # Split by comma and strip whitespace
                     user_input[CONF_WIRED_TRACKER_WHITELIST] = [
                         prefix.strip() for prefix in whitelist_str.split(",") if prefix.strip()
                     ]
@@ -636,7 +633,6 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
             if CONF_WIRED_TRACKER_INTERFACES in user_input:
                 interfaces_str = user_input.get(CONF_WIRED_TRACKER_INTERFACES, "")
                 if interfaces_str:
-                    # Split by comma and strip whitespace
                     user_input[CONF_WIRED_TRACKER_INTERFACES] = [
                         iface.strip() for iface in interfaces_str.split(",") if iface.strip()
                     ]
@@ -658,28 +654,6 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
         current_data = {**self.config_entry.data, **self.config_entry.options}
         options_schema = vol.Schema(
             {
-                vol.Optional(CONF_USE_HTTPS, default=current_data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS)): bool,
-                vol.Optional(
-                    CONF_PORT,
-                    description={"suggested_value": current_data.get(CONF_PORT)},
-                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
-                vol.Optional(CONF_VERIFY_SSL, default=current_data.get(CONF_VERIFY_SSL, False)): bool,
-                vol.Optional(
-                    CONF_ENDPOINT,
-                    default=current_data.get(CONF_ENDPOINT, DEFAULT_ENDPOINT),
-                ): str,
-                vol.Optional(
-                    CONF_USE_HTTPS, default=current_data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS)
-                ): bool,
-                vol.Optional(
-                    CONF_PORT, default=current_data.get(CONF_PORT, DEFAULT_HTTPS_PORT if current_data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS) else DEFAULT_HTTP_PORT)
-                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
-                vol.Optional(
-                    CONF_VERIFY_SSL, default=current_data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
-                ): bool,
-                vol.Optional(
-                    CONF_ENDPOINT, default=current_data.get(CONF_ENDPOINT, DEFAULT_ENDPOINT)
-                ): str,
                 vol.Optional(
                     CONF_WIRELESS_SOFTWARE,
                     default=current_data.get(CONF_WIRELESS_SOFTWARE, DEFAULT_WIRELESS_SOFTWARE),
@@ -725,14 +699,6 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
                     default=current_data.get(CONF_ENABLE_NLBWMON_SENSORS, DEFAULT_ENABLE_NLBWMON_SENSORS),
                 ): bool,
                 vol.Optional(
-                    CONF_ENABLE_MWAN3_SENSORS,
-                    default=current_data.get(CONF_ENABLE_MWAN3_SENSORS, DEFAULT_ENABLE_MWAN3_SENSORS)
-                ): bool,
-                vol.Optional(
-                    CONF_ENABLE_NLBWMON_SENSORS,
-                    default=current_data.get(CONF_ENABLE_NLBWMON_SENSORS, DEFAULT_ENABLE_NLBWMON_SENSORS)
-                ): bool,
-                vol.Optional(
                     CONF_ENABLE_SERVICE_CONTROLS,
                     default=current_data.get(CONF_ENABLE_SERVICE_CONTROLS, DEFAULT_ENABLE_SERVICE_CONTROLS),
                 ): bool,
@@ -743,19 +709,18 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
                         DEFAULT_ENABLE_DEVICE_KICK_BUTTONS,
                     ),
                 ): bool,
-                 vol.Optional(
-                     CONF_ENABLE_WIRELESS_TRACKERS,
-                     default=current_data.get(CONF_ENABLE_WIRELESS_TRACKERS, DEFAULT_ENABLE_WIRELESS_TRACKERS),
-                 ): bool,
-                 vol.Optional(
-                     CONF_WIRELESS_TRACKER_WHITELIST,
-                     description={"suggested_value": ",".join(current_data.get(CONF_WIRELESS_TRACKER_WHITELIST, []))},
-                 ): str,
-                 vol.Optional(
-                     CONF_ENABLE_WIRED_TRACKER,
-                     default=current_data.get(CONF_ENABLE_WIRED_TRACKER, DEFAULT_ENABLE_WIRED_TRACKER),
-                 ): bool,
-
+                vol.Optional(
+                    CONF_ENABLE_WIRELESS_TRACKERS,
+                    default=current_data.get(CONF_ENABLE_WIRELESS_TRACKERS, DEFAULT_ENABLE_WIRELESS_TRACKERS),
+                ): bool,
+                vol.Optional(
+                    CONF_WIRELESS_TRACKER_WHITELIST,
+                    description={"suggested_value": ",".join(current_data.get(CONF_WIRELESS_TRACKER_WHITELIST, []))},
+                ): str,
+                vol.Optional(
+                    CONF_ENABLE_WIRED_TRACKING,
+                    default=current_data.get(CONF_ENABLE_WIRED_TRACKING, DEFAULT_ENABLE_WIRED_TRACKING),
+                ): bool,
                 vol.Optional(
                     CONF_WIRED_TRACKER_NAME_PRIORITY,
                     default=current_data.get(CONF_WIRED_TRACKER_NAME_PRIORITY, DEFAULT_WIRED_TRACKER_NAME_PRIORITY),
@@ -773,32 +738,8 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
                     default=current_data.get(CONF_ENABLE_REBOOT_BUTTON, DEFAULT_ENABLE_REBOOT_BUTTON)
                 ): bool,
                 vol.Optional(
-                    CONF_ENABLE_WIRELESS_TRACKERS,
-                    default=current_data.get(CONF_ENABLE_WIRELESS_TRACKERS, DEFAULT_ENABLE_WIRELESS_TRACKERS)
-                ): bool,
-                vol.Optional(
-                    CONF_WIRELESS_TRACKER_WHITELIST,
-                    description={"suggested_value": ",".join(current_data.get(CONF_WIRELESS_TRACKER_WHITELIST, []))},
-                ): str,
-                vol.Optional(
-                    CONF_ENABLE_WIRED_TRACKER,
-                    default=current_data.get(CONF_ENABLE_WIRED_TRACKER, DEFAULT_ENABLE_WIRED_TRACKER)
-                ): bool,
-                vol.Optional(
-                    CONF_WIRED_TRACKER_NAME_PRIORITY,
-                    default=current_data.get(CONF_WIRED_TRACKER_NAME_PRIORITY, DEFAULT_WIRED_TRACKER_NAME_PRIORITY)
-                ): vol.In(["ipv4", "ipv6", "mac"]),
-                vol.Optional(
-                    CONF_WIRED_TRACKER_WHITELIST,
-                    description={"suggested_value": ",".join(current_data.get(CONF_WIRED_TRACKER_WHITELIST, []))},
-                ): str,
-                vol.Optional(
-                    CONF_WIRED_TRACKER_INTERFACES,
-                    description={"suggested_value": ",".join(current_data.get(CONF_WIRED_TRACKER_INTERFACES, []))},
-                ): str,
-                vol.Optional(
-                    CONF_ENABLE_WIRED_TRACKING,
-                    default=current_data.get(CONF_ENABLE_WIRED_TRACKING, DEFAULT_ENABLE_WIRED_TRACKING)
+                    CONF_ENABLE_TOPOLOGY_PANEL,
+                    default=current_data.get(CONF_ENABLE_TOPOLOGY_PANEL, DEFAULT_ENABLE_TOPOLOGY_PANEL),
                 ): bool,
                 vol.Optional(
                     CONF_SYSTEM_SENSOR_TIMEOUT,

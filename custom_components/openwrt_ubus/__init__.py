@@ -50,8 +50,6 @@ from .const import (
     DEFAULT_ENABLE_MWAN3_SENSORS,
     DEFAULT_ENABLE_SERVICE_CONTROLS,
     DEFAULT_SELECTED_SERVICES,
-    DEFAULT_USE_HTTPS,
-    DEFAULT_ENDPOINT,
     DHCP_SOFTWARES,
     DOMAIN,
     PLATFORMS,
@@ -60,7 +58,7 @@ from .const import (
 )
 from .extended_ubus import ExtendedUbus
 from .shared_data_manager import SharedUbusDataManager
-from .topology import async_setup_topology
+from .topology import async_setup_topology, async_register_topology_panel
 from .ubus_client import create_enhanced_extended_ubus_client
 from .security_utils import CredentialManager, safe_log_data
 
@@ -155,8 +153,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         session_id = await ubus.connect()
         if session_id is None:
             raise ConfigEntryNotReady(f"Failed to connect to OpenWrt device at {hostname}")
-
-        import asyncio
 
         async def _check_availability(check_name: str, create_coro) -> bool:
             """Run an availability check with retries for resilience during startup bursts."""
@@ -356,93 +352,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 async_handle_uci_network_interface,
             )
 
-        # Register UCI services once per integration domain
-        if not hass.data[DOMAIN].get("uci_services_registered"):
-            hass.data[DOMAIN]["uci_services_registered"] = True
-
-            async def async_handle_uci_get(call):
-                """Handle openwrt_ubus.uci_get service."""
-                config = call.data["config"]
-                section = call.data.get("section")
-                option = call.data.get("option")
-                target_entity_id = call.data.get("target_entity_id")
-
-                shared_manager = None
-                for key, value in hass.data[DOMAIN].items():
-                    if key.startswith("data_manager_"):
-                        shared_manager = value
-                        break
-                if shared_manager is None:
-                    _LOGGER.error("No SharedUbusDataManager available for uci_get")
-                    return
-
-                client = await shared_manager.get_ubus_connection_async()
-                result = await client.uci_get_option(config, section, option)
-                value = None
-                try:
-                    if isinstance(result, dict) and "result" in result:
-                        res_list = result["result"]
-                        if len(res_list) >= 2 and isinstance(res_list[1], dict):
-                            values_dict = res_list[1].get("values", {})
-                            if option is not None:
-                                value = values_dict.get(option)
-                            elif values_dict:
-                                value = next(iter(values_dict.values()))
-                except Exception as exc:
-                    _LOGGER.warning("Failed to parse UCI get result: %s", exc)
-
-                if target_entity_id and value is not None:
-                    hass.states.async_set(target_entity_id, value)
-
-            async def async_handle_uci_set_commit(call):
-                """Handle openwrt_ubus.uci_set_commit service."""
-                config = call.data["config"]
-                section = call.data["section"]
-                option = call.data["option"]
-                value = call.data["value"]
-                services_to_restart = call.data.get("service")
-
-                shared_manager = None
-                for key, value_dm in hass.data[DOMAIN].items():
-                    if key.startswith("data_manager_"):
-                        shared_manager = value_dm
-                        break
-                if shared_manager is None:
-                    _LOGGER.error("No SharedUbusDataManager available for uci_set_commit")
-                    return
-
-                client = await shared_manager.get_ubus_connection_async()
-                await client.uci_set_option(config, section, option, value)
-                await client.uci_commit_config(config)
-
-                if services_to_restart:
-                    service_list = services_to_restart if isinstance(services_to_restart, list) else [services_to_restart]
-                    for service_name in service_list:
-                        try:
-                            result = await client.service_action(service_name, "restart")
-                            _LOGGER.info("Restarted service %s after UCI change: %s", service_name, result)
-                        except Exception as exc:
-                            _LOGGER.warning("Failed to restart service %s: %s", service_name, exc)
-
-            async def async_handle_uci_network_interface(call):
-                """Handle openwrt_ubus.uci_network_interface service."""
-                section = call.data["section"]
-                option = call.data["option"]
-                shared_manager = None
-                for key, value in hass.data[DOMAIN].items():
-                    if key.startswith("data_manager_"):
-                        shared_manager = value
-                        break
-                if shared_manager is None:
-                    _LOGGER.error("No SharedUbusDataManager available for uci_network_interface")
-                    return
-                client = await shared_manager.get_ubus_connection_async()
-                await client.uci_network_interface(section, option)
-
-            hass.services.async_register(DOMAIN, "uci_get", async_handle_uci_get)
-            hass.services.async_register(DOMAIN, "uci_set_commit", async_handle_uci_set_commit)
-            hass.services.async_register(DOMAIN, "uci_network_interface", async_handle_uci_network_interface)
-
     except ConnectionRefusedError as exc:
         _LOGGER.error("Setup failed: Connection refused for OpenWrt device at %s", entry.data[CONF_HOST])
         raise ConfigEntryNotReady(
@@ -474,11 +383,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][f"entry_data_{entry.entry_id}"] = dict(entry.data)
 
     # Set up platforms
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    try:
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except ValueError as exc:
+        if "already been setup" in str(exc):
+            _LOGGER.debug("Platform setup skipped (already set up): %s", exc)
+        else:
+            raise
 
     # Clean up devices for disabled sensors after setting up platforms
     # This ensures devices exist before we try to clean them up
     await _cleanup_disabled_sensor_devices(hass, entry)
+
+    # Register topology panel (only once, re-registers on reload)
+    await async_register_topology_panel(hass, entry)
 
     return True
 
@@ -606,27 +524,6 @@ async def _cleanup_disabled_sensor_devices(hass: HomeAssistant, entry: ConfigEnt
             ("ETH", eth_enabled, f"{host}_eth"),
             ("MWAN3", mwan3_enabled, f"{host}_mwan3"),
         ]
-        for name, enabled, main_id in sensors:
-            if enabled:
-                continue
-            main_device = device_registry.async_get_device(identifiers={(DOMAIN, f"{host}_eth")})
-            if not main_device:
-                continue
-            removed_count = 0
-            for device in list(device_registry.devices.values()):  # Use list() to avoid modification during iteration
-                if device.via_device_id == main_device.id:
-                    device_registry.async_remove_device(device.id)
-                    removed_count += 1
-
-            _LOGGER.info("Removing %s devices", name)
-            device_registry.async_remove_device(main_device.id)
-            _LOGGER.debug("Removed %d %s devices", removed_count, name)
-
-        # ETH device cleanup
-        sensors = [
-            ("ETH", eth_enabled, f"{host}_eth"),
-            ("MWAN3", mwan3_enabled, f"{host}_mwan3"),
-        ]
         for name, enabled, device_id in sensors:
             if enabled:
                 continue
@@ -684,7 +581,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.data[DOMAIN].pop("mwan3_available", None)
             hass.data[DOMAIN].pop("nlbwmon_available", None)
 
-        hass.data[DOMAIN].pop("mwan3_available", None)
+        # Allow re-registration of topology panel on next setup (e.g. option change)
+        hass.data[DOMAIN].pop("topology_panel_registered", None)
 
     return unload_ok
 

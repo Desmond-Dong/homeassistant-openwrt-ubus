@@ -105,7 +105,6 @@ class SharedUbusDataManager:
             "system_temperatures": timedelta(seconds=system_timeout),  # System temperature sensors
             "dhcp_clients_count": timedelta(seconds=sta_timeout),  # DHCP clients count
             "network_devices": timedelta(seconds=system_timeout),  # Network device status
-            "wired_devices": timedelta(seconds=sta_timeout),  # Wired device tracking
             "nlbwmon_top_hosts": timedelta(seconds=60),  # Per-host bandwidth usage via nlbwmon
         }
         self._update_locks: Dict[str, asyncio.Lock] = {key: asyncio.Lock() for key in self._update_intervals}
@@ -113,11 +112,6 @@ class SharedUbusDataManager:
         # Initialize ubus clients
         self._ubus_clients: Dict[str, ExtendedUbus] = {}
         self._session = None
-
-    async def logout(self):
-        """Logout all ubus clients."""
-        for client in self._ubus_clients.values():
-            await client.logout()
 
     async def _get_ubus_client(self, client_type: str = "default") -> ExtendedUbus:
         """Get or create ubus client instance."""
@@ -302,13 +296,6 @@ class SharedUbusDataManager:
         except Exception as exc:
             _LOGGER.error("Error fetching service status: %s", exc)
             raise UpdateFailed(f"Error communicating with OpenWrt: {exc}") from exc
-
-    async def _get_interface_to_ssid_mapping(self) -> Dict[str, str]:
-        """Get mapping of interface names to SSIDs."""
-        if not self._interface_to_ssid:
-            client = await self._get_ubus_client()
-            self._interface_to_ssid = await client.get_interface_to_ssid_mapping()
-        return self._interface_to_ssid
 
     async def _fetch_device_statistics(self) -> Dict[str, Any]:
         """Fetch device statistics from wireless interfaces."""
@@ -645,19 +632,27 @@ class SharedUbusDataManager:
         """
         from .const import (
             CONF_ENABLE_WIRED_TRACKER,
+            CONF_ENABLE_WIRED_TRACKING,
             CONF_WIRED_TRACKER_NAME_PRIORITY,
             CONF_WIRED_TRACKER_WHITELIST,
             CONF_WIRED_TRACKER_INTERFACES,
             DEFAULT_ENABLE_WIRED_TRACKER,
+            DEFAULT_ENABLE_WIRED_TRACKING,
             DEFAULT_WIRED_TRACKER_NAME_PRIORITY,
             DEFAULT_WIRED_TRACKER_WHITELIST,
             DEFAULT_WIRED_TRACKER_INTERFACES,
         )
 
-        # Check if wired tracker is enabled
+        # Check if wired tracker is enabled (support both old and new key)
         enabled = self.entry.options.get(
-            CONF_ENABLE_WIRED_TRACKER,
-            self.entry.data.get(CONF_ENABLE_WIRED_TRACKER, DEFAULT_ENABLE_WIRED_TRACKER),
+            CONF_ENABLE_WIRED_TRACKING,
+            self.entry.options.get(
+                CONF_ENABLE_WIRED_TRACKER,
+                self.entry.data.get(
+                    CONF_ENABLE_WIRED_TRACKING,
+                    self.entry.data.get(CONF_ENABLE_WIRED_TRACKER, DEFAULT_ENABLE_WIRED_TRACKING),
+                ),
+            ),
         )
         
         if not enabled:
@@ -760,6 +755,10 @@ class SharedUbusDataManager:
                     # Update state if more recent
                     if neighbor.get("state") in ["REACHABLE", "PERMANENT"]:
                         wired_devices[mac]["state"] = neighbor.get("state")
+
+            # Set ip_address from the best available IP
+            for _, device in wired_devices.items():
+                device["ip_address"] = device["ipv4"] or device["ipv6"] or None
 
             # Get hostname mapping
             dhcp_software = self.entry.data.get(CONF_DHCP_SOFTWARE, DEFAULT_DHCP_SOFTWARE)
