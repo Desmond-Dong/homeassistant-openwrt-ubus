@@ -1,28 +1,23 @@
-# OpenWrt ubus for Home Assistant
+# OpenWrt Ubus Integration for Home Assistant
 
-**English Version** | [中文版本](README_zh.md)
+[![Validate with hassfest](https://github.com/FUjr/homeassistant-openwrt-ubus/actions/workflows/hassfest.yml/badge.svg?branch=dev)](https://github.com/FUjr/homeassistant-openwrt-ubus/actions/workflows/hassfest.yml)
+[![Validate](https://github.com/FUjr/homeassistant-openwrt-ubus/actions/workflows/validate.yml/badge.svg?branch=dev)](https://github.com/FUjr/homeassistant-openwrt-ubus/actions/workflows/validate.yml)
 
-`openwrt_ubus` is a Home Assistant custom integration for OpenWrt routers. It connects to OpenWrt over ubus JSON-RPC and exposes router status, wireless access point data, connected clients, optional wired clients, service controls, and an integration-native topology page.
+[中文版本](README_zh.md) | **English Version**
 
-## Overview
+> **📝 AI-Generated Documentation Notice**  
+> This README is primarily generated and enhanced by AI to provide comprehensive documentation. We welcome contributions from the community to improve and refine this documentation. Your feedback and suggestions are highly valued!
 
-This fork focuses on practical day-to-day monitoring and control:
+## 🚀 Overview
 
-- Router system sensors
-- AP and station sensors
-- Optional QModem sensors
-- Optional network interface sensors
-- Per-device `device_tracker` entities
-- Optional wired client tracking
-- Service switches and control buttons
-- Wireless client kick buttons
-- A built-in topology page for this integration
+The OpenWrt Ubus Integration is a comprehensive Home Assistant custom integration that transforms your OpenWrt router into a powerful smart home hub. By leveraging OpenWrt's native ubus interface, this integration provides real-time device tracking, system monitoring, and advanced network management capabilities directly within Home Assistant.
 
-The topology page is not a Lovelace card. It is registered by the integration itself and can be opened from the integration options menu or directly at `/openwrt-ubus-topology`.
+![Integration Overview](imgs/overview.png)
+*Complete overview of OpenWrt Ubus integration features in Home Assistant*
 
-## Features
+## 🎯 Features Overview
 
-### Device tracking
+This integration provides the following comprehensive features:
 
 ## 🆕 Release Notes
 
@@ -41,91 +36,118 @@ Monitor and manage OpenWrt access point (AP) interfaces with detailed status inf
 - **🔧 Real-time Status**: Live updates of wireless standards (802.11n/ac/ax), channel width, and connection stability
 - **📊 Performance Metrics**: Track data throughput, signal quality, and interference levels
 
-### Sensors
+### 2️⃣ STA Device Management  
+Comprehensive management of devices connected to AP interfaces:
+- **🏷️ Device Identification**: Display hostname, MAC address, IP assignment, and connection duration
+- **📶 Signal Monitoring**: Real-time signal strength (RSSI), connection quality, and data rate tracking
+- **⏱️ Connection Metrics**: Monitor connection time, authentication status, and roaming behavior
+- **🚫 Device Control**: Kick/disconnect unwanted clients using hostapd wireless service (requires hostapd installation)
+- **🔄 Dynamic Discovery**: Automatic detection and entity creation for newly connected devices
 
-- System sensors: uptime, load, memory, board data, temperatures, conntrack, DHCP count and more
-- AP sensors: SSID, channel, frequency, mode, bitrate, signal/quality and related wireless metrics
-- STA sensors: per-client wireless metrics such as RSSI, bitrate, connection time and AP association
-- ETH/interface sensors: bridge, Ethernet, DSA and other network interface counters and status
-- QModem sensors when `modem_ctrl` is available
+### 3️⃣ STA Device Tracker
+Create individual device tracker entities for each connected station:
+- **� Presence Detection**: WiFi-based home/away detection for each connected device
+- **📍 Location Tracking**: Identify which AP interface each device is connected to
+- **⚡ Real-time Updates**: Instant status changes when devices connect or disconnect
+- **🔗 Device Association**: Proper device relationships showing connected devices under their respective AP interfaces
 
-### Service management
+### 4️⃣ System Management
+Monitor and control OpenWrt system resources and services:
+- **📊 System Information**: Track uptime, CPU usage, memory utilization (total/free/cached/buffer), and load averages (1/5/15 min)
+- **🎛️ Service Control**: Start, stop, enable, disable, and restart system services managed by procd
+- **🔧 Service Monitoring**: Real-time status monitoring of critical services like dnsmasq, dropbear, firewall, network, uhttpd, wpad
+- **📈 Performance Tracking**: Continuous monitoring of system health metrics and resource utilization
 
-- Lists procd-managed services from `rc`
-- Creates switch entities for selected services
-- Creates buttons for start, stop, restart, enable and disable actions
+### 5️⃣ QModem Management
+Monitor 4G/5G cellular modem information managed by QModem:
+- **📶 Signal Quality**: Track signal strength, quality indicators, and network registration status
+- **🌡️ Modem Health**: Monitor temperature, power levels, and operational status
+- **📊 Connection Stats**: View data usage, connection uptime, and network operator information
+- **🔗 Network Details**: Display cell tower information, network technology (4G/5G), and connection modes
 
-### Wireless client control
+### 6️⃣ Via Device Implementation
+Proper device hierarchy with via_device relationships:
+- **🏠 Router Level**: Main router device showing all connected AP interfaces and QModem as sub-devices
+- **📡 AP Interface Level**: Each AP interface as a device showing all connected STA devices
+- **📱 Device Navigation**: Easy navigation between router → AP interface → connected devices in Home Assistant UI
+- **🔗 Logical Grouping**: Intuitive device organization matching real network topology
 
-- Optional per-client kick buttons for `hostapd`-managed wireless clients
-- Intended for AP mode interfaces that expose `hostapd.*` ubus methods
+## 📥 Installation & Setup
 
-### Topology page
+### Prerequisites ✅
 
-- Built-in graph page for router, APs, wireless clients and wired clients
-- Keeps recently-missing clients visible as offline for a short grace period
-- Clickable main nodes that open the corresponding Home Assistant device page
-- Discovery overlays for `zeroconf` and `ssdp`
-- Protocol nodes are attached behind the matched client node and shown with dashed edges
-- Discovery matching is conservative: first by IP, then by hostname, and only when the match is unique
+Before installing the integration, ensure your OpenWrt router meets these requirements:
 
-## Requirements
+**Required Packages:**
+```bash
+# Install essential packages on your OpenWrt router
+opkg install rpcd uhttpd-mod-ubus luci-app-uhttpd
 
-Your OpenWrt router should provide ubus over HTTP or HTTPS.
-
-Typical required packages:
-
-```sh
-opkg install rpcd uhttpd uhttpd-mod-ubus luci-app-uhttpd
-```
-
-Optional packages:
-
-```sh
+# For device kick functionality (optional)
 opkg install hostapd
 ```
 
-Required services:
-
-```sh
-/etc/init.d/rpcd enable
-/etc/init.d/rpcd start
-/etc/init.d/uhttpd enable
-/etc/init.d/uhttpd start
+**Required Services:**
+```bash
+# Enable required services
+service rpcd start && service rpcd enable
+service uhttpd start && service uhttpd enable
 ```
 
-For best results, the Home Assistant user you use for this integration should have permission to:
+**Router Configuration:**
+- 🔧 `rpcd` service running (handles ubus JSON-RPC)
+- 🌐 `uhttpd` with ubus support (web interface backend)
+- 🔐 Valid user credentials with appropriate permissions
+- 🌍 Network access from Home Assistant to router
 
-- call ubus objects such as `system`, `iwinfo`, `hostapd.*`, `rc`, `uci`, `dhcp`, `network.device`, `luci-rpc`, `modem_ctrl`
-- read files such as DHCP lease files when hostname resolution depends on them
+### Installation Methods
 
-## Installation
+#### Method 1: Manual Installation
 
-### HACS
+1. **📂 Download**: Clone or download this repository
+   ```bash
+   git clone https://github.com/FUjr/homeassistant-openwrt-ubus.git
+   ```
 
-Add this repository as a custom integration repository in HACS:
+2. **📋 Copy Files**: Copy the integration to your Home Assistant
+   ```bash
+   cp -r homeassistant-openwrt-ubus/custom_components/openwrt_ubus /config/custom_components/
+   ```
 
-`https://github.com/Desmond-Dong/homeassistant-openwrt-ubus`
+3. **🔄 Restart**: Restart Home Assistant
 
-Then install `OpenWrt ubus`, restart Home Assistant, and add the integration from `Settings -> Devices & Services`.
+4. **⚙️ Configure**: Go to **Settings** → **Devices & Services** → **Add Integration**
 
-### Manual
+5. **🔍 Search**: Look for "OpenWrt ubus" and follow the setup wizard
 
-Clone or download this repository and copy `custom_components/openwrt_ubus` into your Home Assistant `custom_components` directory.
+#### Method 2: HACS Installation (Recommended) 🌟
 
-```sh
-git clone https://github.com/Desmond-Dong/homeassistant-openwrt-ubus.git
-```
+> **Note**: This integration is available as a custom HACS repository
 
-Restart Home Assistant and add the integration from `Settings -> Devices & Services`.
+1. **➕ Add Repository**: In HACS, go to **Integrations** → **⋮** → **Custom repositories**
+   
+2. **📦 Install**: Add `https://github.com/FUjr/homeassistant-openwrt-ubus` as Integration
 
-## Router ACL example
+3. **⬇️ Download**: Search for "OpenWrt ubus" and install
 
-If hostnames, file reads or service controls are missing because of permissions, grant the router user the needed ACLs.
+4. **🔄 Restart**: Restart Home Assistant
 
-Example full-access ACL for a trusted admin user:
+5. **⚙️ Setup**: Add the integration through **Settings** → **Devices & Services**
 
-```json
+### Router Permissions Setup 🔐
+
+For enhanced functionality (hostname resolution), configure ACL permissions:
+
+#### Create ACL Configuration
+```bash
+# SSH into your OpenWrt router
+ssh root@your_router_ip
+
+# Create ACL directory
+mkdir -p /usr/share/rpcd/acl.d
+
+# Create ACL file for Home Assistant
+cat > /usr/share/rpcd/acl.d/root.json << 'EOF'
 {
   "root": {
     "description": "Root user full access to ubus",
@@ -141,6 +163,11 @@ Example full-access ACL for a trusted admin user:
     }
   }
 }
+
+EOF
+
+# Restart services to apply changes
+/etc/init.d/rpcd restart && /etc/init.d/uhttpd restart
 ```
 #### For advanced users
 If you want to use a different user from root or have more fine grained control over root access over ubus, substitute "root.json" with "youruser.json" in the line below and inside json:
@@ -186,29 +213,19 @@ cat > /usr/share/rpcd/acl.d/root.json << 'EOF'
 }
 ```
 
-Save it under `/usr/share/rpcd/acl.d/root.json`, then restart `rpcd` and `uhttpd`.
+> **Important**: Without ACL configuration, device names may appear as MAC addresses instead of hostnames.
 
 > **NLBWMon note**: `file.exec` for `/usr/sbin/nlbw` is only required when the NLBWMon top-hosts sensor is enabled. AP-only or minimal OpenWrt installs can leave NLBWMon disabled.
 
 ## 🎛️ Features & Configuration
 
-### Connection options
+### Initial Setup 🛠️
 
-| Option | Meaning | Default |
-| --- | --- | --- |
-| `host` | OpenWrt hostname or IP | required |
-| `username` | Router username | required |
-| `password` | Router password | required |
-| `use_https` | Use HTTPS instead of HTTP | `false` |
-| `verify_ssl` | Verify router certificate | `false` |
-| `cert_path` | Optional client certificate path | empty |
-| `port` | Custom ubus web port | `80` or `443` |
-| `endpoint` | ubus URL path | `ubus` |
-| `tracking_method` | Device tracker unique ID strategy | `combined` |
-| `wireless_software` | Wireless data source | `iwinfo` |
-| `dhcp_software` | DHCP/lease source for hostnames and IPs | `dnsmasq` |
+1. **Navigate to Integration**: Go to **Settings** → **Devices & Services** → **Add Integration**
+2. **Search and Add**: Search for "OpenWrt ubus" and click to add
+3. **Configure Connection**: Enter your router details
 
-### Feature toggles
+### Configuration Options 📋
 
 | Option | Description | Default | Available Options |
 |--------|-------------|---------|------------------|
@@ -223,19 +240,14 @@ Save it under `/usr/share/rpcd/acl.d/root.json`, then restart `rpcd` and `uhttpd
 | ⚙️ **Service Timeout** | Service control timeout | 30s | 5s-300s |
 | 🚫 **Device Kick Buttons** | Enable device kick functionality | Disabled | Enabled/Disabled |
 
-### Timeout options
+---
 
-| Option | Meaning | Default |
-| --- | --- | --- |
-| `system_sensor_timeout` | System and interface polling timeout | `30` |
-| `qmodem_sensor_timeout` | QModem polling timeout | `120` |
-| `sta_sensor_timeout` | STA polling timeout | `30` |
-| `ap_sensor_timeout` | AP polling timeout | `60` |
-| `service_timeout` | Service status/action timeout | `30` |
+### 📱 Device Tracking & Station Management
 
-### Service selection
+The integration provides comprehensive device tracking and management for all devices connected to your OpenWrt router.
 
-When service controls are enabled, open the integration options and use the `Services` step to pick which OpenWrt services should create Home Assistant entities.
+![Device Tracking](imgs/sta_info_devicetracker.png)
+*Device tracker entities showing connected wireless devices with real-time status*
 
 #### Device Tracking Methods
 
@@ -306,22 +318,56 @@ When switching between tracking methods or setting up for the first time:
 - **Real-time Status**: Live updates when devices connect/disconnect with connection state tracking
 - **Device Attributes**: MAC address, hostname, signal strength, connection time, and AP association
 
-Open the topology page from:
+#### DHCP Client Monitoring
+- **dnsmasq Integration**: Monitors DHCP leases from dnsmasq server with lease file parsing
+- **odhcpd Support**: Compatible with odhcpd DHCP server for IPv6 and modern DHCP features
+- **Lease Information**: IP addresses, hostnames, lease expiration, and client identification
+- **Automatic Discovery**: Automatically detects new DHCP clients and creates tracking entities
 
-- `Settings -> Devices & Services -> OpenWrt ubus -> Configure -> Topology`
-- or `/openwrt-ubus-topology`
+**STA Device Features:**
+- ✅ Real-time connection status updates with sub-second response
+- 🏷️ Hostname resolution (with proper ACL configuration)
+- 📍 Device location tracking (which AP interface they're connected to)
+- ⏰ Connection duration tracking with historical data
+- 🔄 Automatic entity creation for new devices with proper naming
+- 📶 Signal strength monitoring with RSSI values and quality metrics
 
-![Topology page preview](imgs/Recording%202026-04-18%20231631.gif)
+#### Connected Device Information Sensors
 
-The graph shows:
+![Station Information](imgs/sta_info_sensor.png)
+*Wireless station sensors showing signal strength and connection quality*
 
-- the router node
-- AP nodes
-- wireless client nodes
-- wired client nodes
-- optional `zeroconf` and `ssdp` discovery nodes attached behind clients
+For each connected device, the integration creates detailed sensor entities:
 
-Protocol overlays are informational only. Main client nodes keep their normal device navigation behavior.
+**Station Sensors Include:**
+- **Signal Strength (RSSI)**: Real-time signal power measurements
+- **Connection Quality**: Link quality percentage and stability metrics
+- **Data Rates**: Current TX/RX rates and maximum supported speeds
+- **Connection Duration**: Time since device connected to the network
+- **Authentication Status**: Security protocol and encryption information
+- **AP Interface**: Which access point the device is connected to
+
+---
+
+### 📊 System Monitoring & Health
+
+Comprehensive system health and performance monitoring for your OpenWrt router.
+
+![System Information](imgs/system_info_sensor.png)
+*System sensors displaying uptime, memory usage, and load averages*
+
+#### System Information Sensors
+The integration provides essential system monitoring with the following sensors:
+
+- `sensor.openwrt_uptime` - System uptime and boot time tracking
+- `sensor.openwrt_load_1` - 1-minute load average for CPU utilization
+- `sensor.openwrt_load_5` - 5-minute load average for medium-term trends  
+- `sensor.openwrt_load_15` - 15-minute load average for long-term patterns
+- `sensor.openwrt_memory_total` - Total system memory available
+- `sensor.openwrt_memory_free` - Current free memory amount
+- `sensor.openwrt_memory_available` - Available memory for applications
+- `sensor.openwrt_memory_buffers` - Memory used for buffers
+- `sensor.openwrt_memory_cached` - Memory used for file system cache
 
 #### QModem LTE/4G/5G Support
 Monitor cellular modem status for routers with LTE/4G/5G capabilities.
@@ -678,36 +724,113 @@ Fine-tune integration performance based on your network and router capabilities:
 Enable comprehensive logging for troubleshooting:
 
 ```yaml
+# Add to configuration.yaml
 logger:
   default: warning
   logs:
     custom_components.openwrt_ubus: debug
-    custom_components.openwrt_ubus.shared_data_manager: debug
     custom_components.openwrt_ubus.extended_ubus: debug
-    custom_components.openwrt_ubus.device_tracker: debug
+    custom_components.openwrt_ubus.shared_data_manager: debug
+    homeassistant.components.device_tracker: debug
 ```
 
-## Project layout
+**Log Analysis Tips:**
+- **Connection Issues**: Look for "Failed to connect" or "Timeout" messages
+- **Authentication Problems**: Search for "401" or "authentication failed" errors
+- **Device Detection**: Check for "No devices found" or parsing errors
+- **Service Control**: Monitor "Service operation failed" messages
 
-```text
+### Performance Monitoring 📊
+
+Monitor integration performance using built-in metrics:
+- **API Response Times**: Check logs for slow ubus calls (>5 seconds)
+- **Update Intervals**: Verify sensors update within expected timeframes
+- **Error Rates**: Monitor for recurring connection or parsing errors
+- **Memory Usage**: Ensure Home Assistant memory remains stable
+
+## 👨‍💻 Development & Architecture
+
+### Project Structure 📁
+```
 custom_components/openwrt_ubus/
-|- __init__.py
-|- config_flow.py
-|- const.py
-|- device_tracker.py
-|- sensor.py
-|- switch.py
-|- button.py
-|- topology.py
-|- shared_data_manager.py
-|- extended_ubus.py
-|- ubus_client.py
-|- buttons/
-|- sensors/
-|- frontend/
-`- Ubus/
+├── __init__.py              # Main integration setup and coordinator management
+├── config_flow.py           # User configuration flow with validation
+├── const.py                 # Constants, defaults, and configuration schemas
+├── device_tracker.py        # Device tracking platform implementation
+├── sensor.py               # Sensor platform coordinator and entity management
+├── switch.py               # Service control switches with real-time status
+├── button.py               # Service control and device kick button coordination
+├── extended_ubus.py        # Enhanced ubus client with batch API and hostapd support
+├── shared_data_manager.py  # Centralized data management and caching optimization
+├── manifest.json           # Integration manifest and dependencies
+├── strings.json            # UI strings and user-facing text
+├── services.yaml           # Service action definitions
+├── Ubus/                   # Core ubus communication library
+│   ├── __init__.py
+│   ├── const.py           # ubus protocol constants
+│   └── interface.py       # Low-level ubus interface implementation
+├── buttons/                # Button entity modules
+│   ├── __init__.py
+│   ├── service_button.py   # Service control buttons (start/stop/restart/enable/disable)
+│   └── device_kick_button.py # Device kick functionality with hostapd integration
+├── sensors/                # Individual sensor platform modules
+│   ├── __init__.py
+│   ├── system_sensor.py    # System information sensors (uptime, memory, load)
+│   ├── qmodem_sensor.py    # QModem/LTE sensors (signal, connection, data)
+│   ├── sta_sensor.py       # Wireless station sensors (per-device metrics)
+│   └── ap_sensor.py        # Access Point sensors (interface status)
+└── translations/           # Localization files for multi-language support
+    ├── en.json            # English translations
+    └── zh.json            # Chinese translations
 ```
 
-## License
+### Integration Architecture 🏗️
 
-This project is licensed under MPL-2.0. See `LICENSE`.
+**Data Flow Architecture:**
+1. **SharedDataUpdateCoordinator**: Central data management with batch API optimization
+2. **ExtendedUbus**: Enhanced ubus client with hostapd integration and error handling
+3. **Platform Modules**: Specialized sensor/entity implementations
+4. **Caching Layer**: Intelligent caching with invalidation strategies
+
+**Key Design Patterns:**
+- **Coordinator Pattern**: Centralized data updates with entity subscriptions
+- **Factory Pattern**: Dynamic entity creation based on detected devices/services
+- **Observer Pattern**: Real-time updates with minimal API calls
+- **Strategy Pattern**: Configurable wireless/DHCP detection methods
+
+### Contributing Guidelines 🤝
+
+1. **🍴 Fork the Repository**: Create your own fork for development
+2. **🌿 Create Feature Branch**: Use descriptive branch names (`feature/device-kick-improvements`)
+3. **✏️ Code Quality**: Follow Home Assistant development guidelines
+4. **🧪 Test Thoroughly**: Test with various OpenWrt configurations
+5. **� Document Changes**: Update README and code comments
+6. **�📤 Submit Pull Request**: Provide detailed description of changes
+
+**Development Setup:**
+- Test with multiple OpenWrt versions (21.02, 22.03, snapshot)
+- Verify compatibility with different wireless drivers (ath9k, ath10k, mt76)
+- Test various hardware platforms (MIPS, ARM, x86)
+
+## 📄 License
+
+This project is licensed under the Mozilla Public License 2.0 (MPL-2.0) - see the LICENSE file for details.
+
+## 🆘 Support & Community
+
+- **🐛 GitHub Issues**: [Report bugs or request features](https://github.com/fujr/homeassistant-openwrt-ubus/issues)
+- **💬 Home Assistant Community**: [Discuss on the forum](https://community.home-assistant.io/)
+- **📖 OpenWrt Documentation**: [Official OpenWrt Wiki](https://openwrt.org/docs/start)
+- **🔧 ubus Reference**: [OpenWrt ubus Documentation](https://openwrt.org/docs/techref/ubus)
+
+## 🙏 Acknowledgments
+
+- **🔧 OpenWrt Project**: For providing excellent open-source router firmware with powerful APIs
+- **🏠 Home Assistant Community**: For integration development resources, testing, and feedback
+- **👥 Contributors & Testers**: Community members who help improve this integration through bug reports, feature requests, and code contributions
+- **📚 Documentation Contributors**: Special thanks to contributors helping improve and refine this documentation
+
+---
+
+> **📝 Documentation Contributions Welcome!**  
+> This README benefits greatly from community input. If you find areas for improvement, unclear instructions, or missing information, please contribute through issues or pull requests. Your experience and feedback help make this integration better for everyone!

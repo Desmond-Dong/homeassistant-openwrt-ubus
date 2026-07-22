@@ -1,121 +1,143 @@
-# Home Assistant 的 OpenWrt ubus 集成
+# OpenWrt Ubus Home Assistant 集成
 
-[English Version](README.md) | **中文版本**
+[![Validate with hassfest](https://github.com/FUjr/homeassistant-openwrt-ubus/actions/workflows/hassfest.yml/badge.svg?branch=dev)](https://github.com/FUjr/homeassistant-openwrt-ubus/actions/workflows/hassfest.yml)
+[![Validate](https://github.com/FUjr/homeassistant-openwrt-ubus/actions/workflows/validate.yml/badge.svg?branch=dev)](https://github.com/FUjr/homeassistant-openwrt-ubus/actions/workflows/validate.yml)
 
-`openwrt_ubus` 是一个面向 OpenWrt 路由器的 Home Assistant 自定义集成。它通过 ubus JSON-RPC 连接 OpenWrt，并在 Home Assistant 中提供路由器状态、AP 与客户端信息、可选有线设备跟踪、服务控制，以及一个集成内置的拓扑页面。
+**中文版本** | [English Version](README.md)
 
-## 简介
+> **📝 AI 生成文档声明**  
+> 本 README 主要由 AI 生成和增强，以提供全面的文档说明。我们欢迎社区贡献者帮助改进和完善此文档。您的反馈和建议非常宝贵！
 
-这个 fork 主要聚焦在稳定、实用的日常监控与控制：
+## 🚀 项目概述
 
-- 路由器系统传感器
-- AP 与 STA 传感器
-- 可选 QModem 传感器
-- 可选网络接口传感器
-- 每个客户端独立的 `device_tracker`
-- 可选的有线客户端跟踪
-- 服务开关与控制按钮
-- 无线客户端踢除按钮
-- 集成原生拓扑页面
+OpenWrt Ubus 集成是一个功能全面的 Home Assistant 自定义集成，它将您的 OpenWrt 路由器转变为强大的智能家居中枢。通过利用 OpenWrt 原生的 ubus 接口，此集成在 Home Assistant 中提供实时设备跟踪、系统监控和高级网络管理功能。
 
-拓扑页面不是 Lovelace 卡片，而是由集成本身注册的独立页面。你可以从集成选项菜单打开，或者直接访问 `/openwrt-ubus-topology`。
+![集成概览](imgs/overview.png)
+*Home Assistant 中 OpenWrt Ubus 集成功能的完整概览*
 
-## 功能
+## 🎯 功能概览
 
-### 设备跟踪
+本集成提供以下全面功能：
 
-- 通过 `iwinfo` 或 `hostapd` 跟踪无线客户端
-- 启用后也可以根据 ARP 和邻居信息跟踪有线客户端
-- 为每个客户端 MAC 创建 Home Assistant `device_tracker` 实体
-- 通过 `via_device` 保留 AP 层级关系
-- 客户端命名顺序为：主机名、客户端 IP、MAC
-- 对于刚掉线的无线客户端，会优先保留为离线无线状态，避免被残留 ARP 数据立即误判为有线
+### 1️⃣ AP 接口管理
+监控和管理 OpenWrt 接入点（AP）接口的详细状态信息：
+- **� AP 主机模式**：查看托管的无线网络，包括 SSID、加密、频道信息、连接客户端数量和带宽利用率
+- **📶 AP 客户端模式**：监控上游无线网络连接，包括信号强度、数据速率和连接质量指标
+- **🔧 实时状态**：实时更新无线标准（802.11n/ac/ax）、频道宽度和连接稳定性
+- **📊 性能指标**：跟踪数据吞吐量、信号质量和干扰水平
 
-### 传感器
+### 2️⃣ STA 设备管理  
+全面管理连接到 AP 接口的设备：
+- **🏷️ 设备识别**：显示主机名、MAC 地址、IP 分配和连接时长
+- **📶 信号监控**：实时信号强度（RSSI）、连接质量和数据速率跟踪
+- **⏱️ 连接指标**：监控连接时间、认证状态和漫游行为
+- **🚫 设备控制**：使用 hostapd 无线服务踢出/断开不需要的客户端（需要安装 hostapd）
+- **🔄 动态发现**：自动检测并为新连接的设备创建实体
 
-- 系统传感器：运行时间、负载、内存、板级信息、温度、conntrack、DHCP 数量等
-- AP 传感器：SSID、信道、频率、模式、速率、信号和质量等无线指标
-- STA 传感器：每个无线客户端的 RSSI、速率、连接时长、所属 AP 等
-- ETH/接口传感器：bridge、Ethernet、DSA 等网络接口状态和计数器
-- 当 `modem_ctrl` 可用时提供 QModem 传感器
+### 3️⃣ STA 设备跟踪器
+为每个连接的站点创建独立的设备跟踪器实体：
+- **🏠 在家检测**：基于 WiFi 的在家/离家检测功能
+- **📍 位置跟踪**：识别每个设备连接到哪个 AP 接口
+- **⚡ 实时更新**：设备连接或断开时的即时状态变化
+- **🔗 设备关联**：正确的设备关系，在各自的 AP 接口下显示连接的设备
 
-### 服务管理
+### 4️⃣ 系统管理
+监控和控制 OpenWrt 系统资源和服务：
+- **📊 系统信息**：跟踪运行时间、CPU 使用率、内存利用率（总计/空闲/缓存/缓冲区）和负载平均值（1/5/15 分钟）
+- **🎛️ 服务控制**：启动、停止、启用、禁用和重启由 procd 管理的系统服务
+- **🔧 服务监控**：实时状态监控关键服务，如 dnsmasq、dropbear、firewall、network、uhttpd、wpad
+- **📈 性能跟踪**：持续监控系统健康指标和资源利用率
 
-- 从 `rc` 列出由 procd 管理的服务
-- 为选中的服务创建开关实体
-- 创建启动、停止、重启、启用、禁用按钮
+### 5️⃣ QModem 管理
+监控由 QModem 管理的 4G/5G 蜂窝调制解调器信息：
+- **� 信号质量**：跟踪信号强度、质量指标和网络注册状态
+- **🌡️ 调制解调器健康**：监控温度、功率水平和运行状态
+- **📊 连接统计**：查看数据使用情况、连接运行时间和网络运营商信息
+- **🔗 网络详情**：显示基站信息、网络技术（4G/5G）和连接模式
 
-### 无线客户端控制
+### 6️⃣ Via Device 实现
+正确的设备层次结构和 via_device 关系：
+- **� 路由器级别**：主路由器设备显示所有连接的 AP 接口和 QModem 作为子设备
+- **📡 AP 接口级别**：每个 AP 接口作为设备显示所有连接的 STA 设备
+- **📱 设备导航**：在 Home Assistant UI 中轻松导航路由器 → AP 接口 → 连接设备
+- **🔗 逻辑分组**：符合真实网络拓扑的直观设备组织
 
-- 可选的逐客户端踢除按钮，适用于 `hostapd` 管理的无线客户端
-- 主要面向暴露 `hostapd.*` ubus 方法的 AP 模式接口
+## 📥 安装与设置
 
-### 拓扑页面
+### 前置要求 ✅
 
-- 内置图形页面，展示路由器、AP、无线客户端和有线客户端
-- 对刚刚消失的客户端短时间保留为离线状态
-- 主节点可点击跳转到对应的 Home Assistant 设备页
-- 支持 `zeroconf` 和 `ssdp` 发现叠加层
-- 协议节点挂在客户端节点后方，并使用虚线边显示
-- 匹配策略偏保守：先按 IP，再按 hostname，且只接受唯一匹配
+在安装集成之前，请确保您的 OpenWrt 路由器满足以下要求：
 
-## 依赖要求
+**必需软件包：**
+```bash
+# 在您的 OpenWrt 路由器上安装必要软件包
+opkg install rpcd uhttpd-mod-ubus luci-app-uhttpd
 
-你的 OpenWrt 路由器需要通过 HTTP 或 HTTPS 提供 ubus 接口。
-
-常见必需软件包：
-
-```sh
-opkg install rpcd uhttpd uhttpd-mod-ubus luci-app-uhttpd
-```
-
-可选软件包：
-
-```sh
+# 设备踢出功能（可选）
 opkg install hostapd
 ```
 
-必需服务：
-
-```sh
-/etc/init.d/rpcd enable
-/etc/init.d/rpcd start
-/etc/init.d/uhttpd enable
-/etc/init.d/uhttpd start
+**必需服务：**
+```bash
+# 启用必需服务
+service rpcd start && service rpcd enable
+service uhttpd start && service uhttpd enable
 ```
 
-为了让功能完整可用，建议集成使用的 OpenWrt 用户至少有权限：
+**路由器配置：**
+- 🔧 `rpcd` 服务运行中（处理 ubus JSON-RPC）
+- 🌐 `uhttpd` 支持 ubus（Web 界面后端）
+- 🔐 有效的用户凭据和适当权限
+- 🌍 Home Assistant 到路由器的网络访问
 
-- 调用 `system`、`iwinfo`、`hostapd.*`、`rc`、`uci`、`dhcp`、`network.device`、`luci-rpc`、`modem_ctrl` 等 ubus 对象
-- 在主机名解析依赖租约文件时，可以读取 DHCP lease 文件
+### 安装方法
 
-## 安装
+#### 方法一：手动安装
 
-### HACS
+1. **📂 下载**：克隆或下载此仓库
+   ```bash
+   git clone https://github.com/FUjr/homeassistant-openwrt-ubus.git
+   ```
 
-在 HACS 中将本仓库添加为自定义集成源：
+2. **📋 复制文件**：将集成复制到您的 Home Assistant
+   ```bash
+   cp -r homeassistant-openwrt-ubus/custom_components/openwrt_ubus /config/custom_components/
+   ```
 
-`https://github.com/Desmond-Dong/homeassistant-openwrt-ubus`
+3. **🔄 重启**：重启 Home Assistant
 
-然后安装 `OpenWrt ubus`，重启 Home Assistant，再到 `设置 -> 设备与服务` 中添加集成。
+4. **⚙️ 配置**：转到 **设置** → **设备与服务** → **添加集成**
 
-### 手动安装
+5. **🔍 搜索**：查找 "OpenWrt ubus" 并按照设置向导进行配置
 
-克隆或下载本仓库，然后把 `custom_components/openwrt_ubus` 复制到 Home Assistant 的 `custom_components` 目录。
+#### 方法二：HACS 安装（推荐）🌟
 
-```sh
-git clone https://github.com/Desmond-Dong/homeassistant-openwrt-ubus.git
-```
+> **注意**：此集成可作为自定义 HACS 仓库使用
 
-重启 Home Assistant 后，在 `设置 -> 设备与服务` 中添加集成。
+1. **➕ 添加仓库**：在 HACS 中，转到 **集成** → **⋮** → **自定义仓库**
+   
+2. **📦 安装**：添加 `https://github.com/FUjr/homeassistant-openwrt-ubus` 作为集成
 
-## 路由器 ACL 示例
+3. **⬇️ 下载**：搜索 "OpenWrt ubus" 并安装
 
-如果主机名、文件读取或服务控制因权限不足不可用，请给路由器上的用户授予相应 ACL。
+4. **🔄 重启**：重启 Home Assistant
 
-下面是一个可信管理员用户的完整权限示例：
+5. **⚙️ 设置**：通过 **设置** → **设备与服务** 添加集成
 
-```json
+### 路由器权限设置 🔐
+
+为了增强功能（主机名解析），请配置 ACL 权限：
+
+#### 创建 ACL 配置
+```bash
+# SSH 连接到您的 OpenWrt 路由器
+ssh root@your_router_ip
+
+# 创建 ACL 目录
+mkdir -p /usr/share/rpcd/acl.d
+
+# 为 Home Assistant 创建 ACL 文件
+cat > /usr/share/rpcd/acl.d/root.json << 'EOF'
 {
   "root": {
     "description": "Root user full access to ubus",
@@ -131,121 +153,147 @@ git clone https://github.com/Desmond-Dong/homeassistant-openwrt-ubus.git
     }
   }
 }
+
+EOF
+
+# 重启服务以应用更改
+/etc/init.d/rpcd restart && /etc/init.d/uhttpd restart
 ```
 
-将它保存到 `/usr/share/rpcd/acl.d/root.json`，然后重启 `rpcd` 和 `uhttpd`。
+> **重要**：没有 ACL 配置，设备名称可能显示为 MAC 地址而不是主机名。
 
-## 配置项
+## 🎛️ 功能与配置
 
-### 连接配置
+### 初始设置 🛠️
 
-| 选项 | 含义 | 默认值 |
-| --- | --- | --- |
-| `host` | OpenWrt 主机名或 IP | 必填 |
-| `username` | 路由器用户名 | 必填 |
-| `password` | 路由器密码 | 必填 |
-| `use_https` | 使用 HTTPS 而不是 HTTP | `false` |
-| `verify_ssl` | 校验路由器证书 | `false` |
-| `cert_path` | 可选客户端证书路径 | 空 |
-| `port` | 自定义 ubus Web 端口 | `80` 或 `443` |
-| `endpoint` | ubus URL 路径 | `ubus` |
-| `tracking_method` | 设备跟踪唯一 ID 策略 | `combined` |
-| `wireless_software` | 无线数据来源 | `iwinfo` |
-| `dhcp_software` | 主机名和 IP 的 DHCP/租约来源 | `dnsmasq` |
+1. **导航到集成**：转到 **设置** → **设备与服务** → **添加集成**
+2. **搜索并添加**：搜索 "OpenWrt ubus" 并点击添加
+3. **配置连接**：输入您的路由器详细信息
 
-### 功能开关
+### 配置选项 📋
 
-| 选项 | 含义 | 默认值 |
-| --- | --- | --- |
-| `enable_system_sensors` | 系统/路由器传感器 | `true` |
-| `enable_qmodem_sensors` | QModem 传感器 | `true` |
-| `enable_sta_sensors` | 每客户端无线传感器 | `true` |
-| `enable_ap_sensors` | AP 传感器 | `true` |
-| `enable_eth_sensors` | 网络接口传感器 | `true` |
-| `enable_service_controls` | 服务开关和控制按钮 | `false` |
-| `enable_device_kick_buttons` | 无线踢除按钮 | `false` |
-| `enable_wired_tracking` | 跟踪有线 LAN 客户端 | `false` |
+| 选项 | 描述 | 默认值 | 可用选项 |
+|------|------|--------|----------|
+| 🏠 **主机** | 路由器 IP 地址 | - | 任何有效的 IP 地址 |
+| 👤 **用户名** | 登录用户名 | - | 通常为 'root' |
+| 🔑 **密码** | 登录密码 | - | 路由器管理密码 |
+| 📡 **无线软件** | 无线监控方法 | iwinfo | iwinfo, hostapd |
+| 🌐 **DHCP 软件** | DHCP 客户端检测 | dnsmasq | dnsmasq, odhcpd, none |
+| ⏱️ **系统超时** | 系统数据获取超时 | 30秒 | 5-300秒 |
+| 📊 **QModem 超时** | QModem 数据获取超时 | 30秒 | 5-300秒 |
+| ⚙️ **服务超时** | 服务控制超时 | 30秒 | 5-300秒 |
+| 🚫 **设备踢出按钮** | 启用设备踢出功能 | 禁用 | 启用/禁用 |
 
-### 超时配置
+---
 
-| 选项 | 含义 | 默认值 |
-| --- | --- | --- |
-| `system_sensor_timeout` | 系统和接口轮询超时 | `30` |
-| `qmodem_sensor_timeout` | QModem 轮询超时 | `120` |
-| `sta_sensor_timeout` | STA 轮询超时 | `30` |
-| `ap_sensor_timeout` | AP 轮询超时 | `60` |
-| `service_timeout` | 服务状态和控制超时 | `30` |
+### 📱 设备跟踪与站点管理
 
-### 服务选择
+集成为连接到您 OpenWrt 路由器的所有设备提供全面的设备跟踪和管理。
 
-启用服务控制后，请在集成选项中进入 `Services` 步骤，选择要在 Home Assistant 中创建实体的 OpenWrt 服务。
+![设备跟踪](imgs/sta_info_devicetracker.png)
+*设备跟踪器实体显示连接的无线设备及实时状态*
 
-## 拓扑页面
+#### 无线设备检测
+- **iwinfo 方法**：使用 OpenWrt 的 iwinfo 进行系统级监控来检测无线客户端
+- **hostapd 方法**：直接连接到 hostapd 守护程序获得实时更新和踢出功能
+- **实时状态**：设备连接/断开时的实时更新和连接状态跟踪
+- **设备属性**：MAC 地址、主机名、信号强度、连接时间和 AP 关联
 
-可以通过以下方式打开拓扑页面：
+#### DHCP 客户端监控
+- **dnsmasq 集成**：通过租约文件解析监控来自 dnsmasq 服务器的 DHCP 租约
+- **odhcpd 支持**：兼容 odhcpd DHCP 服务器的 IPv6 和现代 DHCP 功能
+- **租约信息**：IP 地址、主机名、租约到期时间和客户端标识
+- **自动发现**：自动检测新的 DHCP 客户端并创建跟踪实体
 
-- `设置 -> 设备与服务 -> OpenWrt ubus -> 配置 -> Topology`
-- 或直接访问 `/openwrt-ubus-topology`
+**STA 设备功能：**
+- ✅ 亚秒级响应的实时连接状态更新
+- 🏷️ 主机名解析（需要适当的 ACL 配置）
+- 📍 设备位置跟踪（连接到哪个 AP 接口）
+- ⏰ 带历史数据的连接时长跟踪
+- 🔄 为新设备自动创建实体并正确命名
+- 📶 带 RSSI 值和质量指标的信号强度监控
 
-图中会显示：
+#### 连接设备信息传感器
 
-- 路由器节点
-- AP 节点
-- 无线客户端节点
-- 有线客户端节点
-- 可选的 `zeroconf` 和 `ssdp` 协议发现节点
+![站点信息](imgs/sta_info_sensor.png)
+*无线站点传感器显示信号强度和连接质量*
 
-协议叠加节点仅用于展示发现信息，主客户端节点仍保持正常的设备跳转行为。
+对于每个连接的设备，集成会创建详细的传感器实体：
 
-## 客户端命名说明
+**站点传感器包括：**
+- **信号强度（RSSI）**：实时信号功率测量
+- **连接质量**：链路质量百分比和稳定性指标
+- **数据速率**：当前 TX/RX 速率和最大支持速度
+- **连接时长**：设备连接到网络的时间
+- **认证状态**：安全协议和加密信息
+- **AP 接口**：设备连接到的接入点
 
-客户端命名逻辑刻意保持简单稳定：
+---
 
-- 有主机名就用主机名
-- 没有主机名就用客户端自己的 IP 地址
-- 再没有就回退到不带分隔符的 MAC 地址
+### 📊 系统监控与健康
 
-如果你看到的仍然主要是 MAC，通常说明 Home Assistant 无法从 OpenWrt 读取 DHCP 租约或 host hints，多半是 ACL 权限不够。
+为您的 OpenWrt 路由器提供全面的系统健康和性能监控。
 
-## 有线跟踪说明
+![系统信息](imgs/system_info_sensor.png)
+*系统传感器显示运行时间、内存使用和负载平均值*
 
-有线跟踪基于路由器上的 ARP 和邻居信息，因此：
+#### 系统信息传感器
+集成提供以下系统监控传感器：
 
-- 它很有用，但没有无线站点在线数据那么权威
-- 残留 ARP 项可能比真实连通状态多保留一段时间
-- 这个 fork 使用了更保守的回退逻辑，尽量避免刚掉线的无线客户端被过快翻成有线
+- `sensor.openwrt_uptime` - 系统运行时间和启动时间跟踪
+- `sensor.openwrt_load_1` - 1分钟负载平均值用于 CPU 利用率
+- `sensor.openwrt_load_5` - 5分钟负载平均值用于中期趋势  
+- `sensor.openwrt_load_15` - 15分钟负载平均值用于长期模式
+- `sensor.openwrt_memory_total` - 总系统内存
+- `sensor.openwrt_memory_free` - 当前空闲内存数量
+- `sensor.openwrt_memory_available` - 应用程序可用内存
+- `sensor.openwrt_memory_buffers` - 缓冲区使用的内存
+- `sensor.openwrt_memory_cached` - 文件系统缓存使用的内存
 
-## 故障排查
+#### QModem LTE/4G/5G 支持
+为具有 LTE/4G/5G 功能的路由器监控蜂窝调制解调器状态。
 
-### 无法连接
+![QModem 信息](imgs/qmodem_info.png)
+*QModem 传感器显示 LTE 信号强度、连接状态和数据使用情况*
 
-- 确认 `rpcd` 和 `uhttpd` 正在运行
-- 确认 URL、协议、端口和 endpoint 配置正确
-- 如果使用自签名 HTTPS，而你没有完整证书链，请保持 `verify_ssl` 为关闭
+**QModem 传感器包括：**
+- **信号强度与质量**：RSSI、SINR 和信号质量指标
+- **连接状态**：注册状态、连接运行时间和网络可用性
+- **数据使用统计**：传输和接收的数据量
+- **网络信息**：运营商名称、基站 ID 和技术类型（4G/5G）
+- **调制解调器健康**：温度监控和运行状态
+- **连接详情**：IP 地址分配和连接模式信息
 
-### 设备只显示 MAC
+---
 
-- 检查路由器上的 DHCP 租约和 host hints 是否可读
-- 检查集成用户的 OpenWrt ACL 权限
-- 确认 `dhcp_software` 与路由器实际配置一致
+### 🌐 接入点管理与控制
 
-### 没有服务实体
+监控和管理无线接入点，提供详细的状态信息和控制功能。
 
-- 在集成选项里启用服务控制
-- 进入 `Services` 步骤，至少勾选一个服务
-- 确认用户有 `rc` 的 ubus 访问权限
+#### AP 客户端模式
+![AP 客户端模式](imgs/ap_info_client.png)
+*接入点处于客户端模式 - 连接到上游无线网络*
 
-### 没有踢除按钮
+**客户端模式功能：**
+- **上游连接**：监控到父接入点的连接
+- **信号指标**：到上游 AP 的信号强度（RSSI）和质量
+- **性能数据**：当前数据速率和连接稳定性
+- **网络信息**：连接的 SSID、频道和安全协议
+- **漫游支持**：跟踪上游接入点之间的切换
 
-- 安装并运行 `hostapd`
-- 确认无线侧配置使用的是 `hostapd`
-- 确认 `hostapd.*` ubus 方法可见且权限允许
+#### AP 主机模式
+![AP 主机模式](imgs/ap_info_master.png)
+*接入点处于主机模式 - 为客户端托管无线网络*
 
-### 拓扑页面为空或显示不全
+**主机模式功能：**
+- **连接客户端**：关联无线设备的实时计数
+- **频道信息**：当前频道、宽度和干扰水平
+- **网络配置**：SSID、加密类型和安全设置
+- **性能指标**：带宽利用率和吞吐量统计
+- **覆盖分析**：信号传播和覆盖质量数据
+---
 
-- 先正常进入一次集成，让数据管理器启动
-- 确认 AP 和客户端相关数据源已启用
-- 检查 Home Assistant 日志中是否有 ubus 权限或解析错误
+### 🎛️ 服务控制与系统管理
 
 为 OpenWrt 系统服务提供全面的服务管理，具有实时状态监控和控制功能。
 
@@ -539,33 +587,62 @@ logger:
   default: warning
   logs:
     custom_components.openwrt_ubus: debug
-    custom_components.openwrt_ubus.shared_data_manager: debug
     custom_components.openwrt_ubus.extended_ubus: debug
-    custom_components.openwrt_ubus.device_tracker: debug
+    custom_components.openwrt_ubus.shared_data_manager: debug
+    homeassistant.components.device_tracker: debug
 ```
 
-## 项目结构
+**日志分析技巧：**
+- **连接问题**：查找 "Failed to connect" 或 "Timeout" 消息
+- **认证问题**：搜索 "401" 或 "authentication failed" 错误
+- **设备检测**：检查 "No devices found" 或解析错误
+- **服务控制**：监控 "Service operation failed" 消息
 
-```text
+### 性能监控 📊
+
+使用内置指标监控集成性能：
+- **API 响应时间**：检查日志中的慢 ubus 调用（>5秒）
+- **更新间隔**：验证传感器在预期时间框架内更新
+- **错误率**：监控重复发生的连接或解析错误
+- **内存使用**：确保 Home Assistant 内存保持稳定
+
+## 👨‍💻 开发与架构
+
+### 项目结构 📁
+```
 custom_components/openwrt_ubus/
-|- __init__.py
-|- config_flow.py
-|- const.py
-|- device_tracker.py
-|- sensor.py
-|- switch.py
-|- button.py
-|- topology.py
-|- shared_data_manager.py
-|- extended_ubus.py
-|- ubus_client.py
-|- buttons/
-|- sensors/
-|- frontend/
-`- Ubus/
+├── __init__.py              # 主集成设置和协调器管理
+├── config_flow.py           # 用户配置流程和验证
+├── const.py                 # 常量、默认值和配置架构
+├── device_tracker.py        # 设备跟踪平台实现
+├── sensor.py               # 传感器平台协调器和实体管理
+├── switch.py               # 具有实时状态的服务控制开关
+├── button.py               # 服务控制和设备踢出按钮协调
+├── extended_ubus.py        # 增强的 ubus 客户端，支持批量 API 和 hostapd
+├── shared_data_manager.py  # 集中数据管理和缓存优化
+├── manifest.json           # 集成清单和依赖项
+├── strings.json            # UI 字符串和用户界面文本
+├── services.yaml           # 服务操作定义
+├── Ubus/                   # 核心 ubus 通信库
+│   ├── __init__.py
+│   ├── const.py           # ubus 协议常量
+│   └── interface.py       # 低级 ubus 接口实现
+├── buttons/                # 按钮实体模块
+│   ├── __init__.py
+│   ├── service_button.py   # 服务控制按钮（启动/停止/重启/启用/禁用）
+│   └── device_kick_button.py # 设备踢出功能与 hostapd 集成
+├── sensors/                # 各个传感器平台模块
+│   ├── __init__.py
+│   ├── system_sensor.py    # 系统信息传感器（运行时间、内存、负载）
+│   ├── qmodem_sensor.py    # QModem/LTE 传感器（信号、连接、数据）
+│   ├── sta_sensor.py       # 无线站点传感器（每设备指标）
+│   └── ap_sensor.py        # 接入点传感器（接口状态）
+└── translations/           # 多语言支持的本地化文件
+    ├── en.json            # 英文翻译
+    └── zh.json            # 中文翻译
 ```
 
-## 许可证
+### 集成架构 🏗️
 
 **数据流架构：**
 1. **SharedDataUpdateCoordinator**：具有批量 API 优化的中央数据管理
