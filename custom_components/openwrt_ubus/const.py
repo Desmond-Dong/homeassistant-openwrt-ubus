@@ -175,3 +175,8 @@ def build_configuration_url(host: str, use_https: bool = False, port: int | None
     scheme = "https" if use_https else "http"
     host_port = _build_host_port(host, use_https, port)
     return f"{scheme}://{host_port}"
+
+
+def get_config_value(entry, key: str, default):
+    """Get configuration value with priority: options > data > default."""
+    return entry.options.get(key, entry.data.get(key, default))

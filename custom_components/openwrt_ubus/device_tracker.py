@@ -428,11 +428,6 @@ async def _create_entities_for_devices(
         # Normalize MAC address format to ensure consistency
         mac_address = mac_address.upper()
 
-        # Skip if already in known devices
-        if not include_known and mac_address in coordinator.known_devices:
-            _LOGGER.debug("Device %s already in known devices, skipping", mac_address)
-            continue
-
         # Generate unique_id based on tracking method
         unique_id = _generate_unique_id(host, mac_address, tracking_method)
 

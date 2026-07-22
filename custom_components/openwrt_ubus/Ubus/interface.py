@@ -7,6 +7,8 @@ from typing import Any
 
 import aiohttp
 
+from ..security_utils import redact_sensitive_data
+
 from .const import (
     API_DEF_DEBUG,
     API_DEF_SESSION_ID,
@@ -193,7 +195,7 @@ class Ubus:
             _LOGGER.debug(
                 'batch call: status="%s" response="%s"',
                 response.status,
-                responses,
+                redact_sensitive_data(responses),
             )
 
         # For batch calls, the response is an array of responses
@@ -303,7 +305,7 @@ class Ubus:
                 rpc_method,
                 subsystem,
                 method,
-                params,
+                redact_sensitive_data(params),
             )
 
         results = await self._batch_call(

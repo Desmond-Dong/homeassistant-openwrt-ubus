@@ -41,12 +41,6 @@ BUTTON_MODULES = [
         "default": DEFAULT_ENABLE_REBOOT_BUTTON,
         "name": "reboot_button",
     },
-    {
-        "module": reboot_button,
-        "config_key": CONF_ENABLE_REBOOT_BUTTON,
-        "default": DEFAULT_ENABLE_REBOOT_BUTTON,
-        "name": "reboot_button"
-    },
 ]
 
 
