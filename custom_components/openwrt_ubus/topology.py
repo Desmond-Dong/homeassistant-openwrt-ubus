@@ -90,6 +90,9 @@ def _format_device_label(device_data: dict, fallback: str) -> str:
     ip_address = device_data.get("ip_address")
 
     if hostname and hostname not in ("*", fallback, fallback.upper()):
+        # If hostname looks like an IP address, return it as-is
+        if hostname.replace(".", "").isdigit() or ":" in hostname:
+            return hostname
         return hostname.split(".", 1)[0]
     if ip_address and ip_address != "Unknown IP":
         return ip_address
