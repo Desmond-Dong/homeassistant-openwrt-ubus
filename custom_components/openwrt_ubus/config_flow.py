@@ -29,15 +29,28 @@ from .const import (
     CONF_ENABLE_SYSTEM_SENSORS,
     CONF_ENABLE_AP_SENSORS,
     CONF_ENABLE_ETH_SENSORS,
+    CONF_ENABLE_MWAN3_SENSORS,
+    CONF_ENABLE_NLBWMON_SENSORS,
     CONF_ENABLE_SERVICE_CONTROLS,
     CONF_ENABLE_DEVICE_KICK_BUTTONS,
+    CONF_ENABLE_REBOOT_BUTTON,
     CONF_ENABLE_WIRED_TRACKING,
+    CONF_ENABLE_WIRED_TRACKER,
+    CONF_WIRED_TRACKER_NAME_PRIORITY,
+    CONF_WIRED_TRACKER_WHITELIST,
+    CONF_WIRED_TRACKER_INTERFACES,
+    CONF_ENABLE_WIRELESS_TRACKERS,
+    CONF_WIRELESS_TRACKER_WHITELIST,
+    CONF_SELECT_ALL_STA,
+    CONF_SELECTED_STA,
     CONF_SELECTED_SERVICES,
     CONF_SYSTEM_SENSOR_TIMEOUT,
     CONF_QMODEM_SENSOR_TIMEOUT,
     CONF_STA_SENSOR_TIMEOUT,
     CONF_AP_SENSOR_TIMEOUT,
+    CONF_MWAN3_SENSOR_TIMEOUT,
     CONF_SERVICE_TIMEOUT,
+    CONF_CONSIDER_HOME,
     DEFAULT_DHCP_SOFTWARE,
     DEFAULT_WIRELESS_SOFTWARE,
     DEFAULT_USE_HTTPS,
@@ -51,20 +64,33 @@ from .const import (
     DEFAULT_ENABLE_SYSTEM_SENSORS,
     DEFAULT_ENABLE_AP_SENSORS,
     DEFAULT_ENABLE_ETH_SENSORS,
+    DEFAULT_ENABLE_MWAN3_SENSORS,
+    DEFAULT_ENABLE_NLBWMON_SENSORS,
     DEFAULT_ENABLE_SERVICE_CONTROLS,
     DEFAULT_ENABLE_DEVICE_KICK_BUTTONS,
+    DEFAULT_ENABLE_REBOOT_BUTTON,
     DEFAULT_ENABLE_WIRED_TRACKING,
+    DEFAULT_ENABLE_WIRED_TRACKER,
+    DEFAULT_WIRED_TRACKER_NAME_PRIORITY,
+    DEFAULT_WIRED_TRACKER_WHITELIST,
+    DEFAULT_WIRED_TRACKER_INTERFACES,
+    DEFAULT_ENABLE_WIRELESS_TRACKERS,
+    DEFAULT_SELECT_ALL_STA,
+    DEFAULT_SELECTED_STA,
     DEFAULT_SYSTEM_SENSOR_TIMEOUT,
     DEFAULT_QMODEM_SENSOR_TIMEOUT,
     DEFAULT_STA_SENSOR_TIMEOUT,
     DEFAULT_AP_SENSOR_TIMEOUT,
+    DEFAULT_MWAN3_SENSOR_TIMEOUT,
     DEFAULT_SERVICE_TIMEOUT,
+    DEFAULT_CONSIDER_HOME,
     DHCP_SOFTWARES,
     DOMAIN,
     TRACKING_METHODS,
     WIRELESS_SOFTWARES,
     API_SUBSYS_RC,
     API_METHOD_LIST,
+    API_DEF_TIMEOUT,
     build_ubus_url,
 )
 from .Ubus.const import API_RPC_CALL
@@ -104,8 +130,13 @@ STEP_SENSORS_DATA_SCHEMA = vol.Schema(
         vol.Optional(CONF_ENABLE_STA_SENSORS, default=DEFAULT_ENABLE_STA_SENSORS): bool,
         vol.Optional(CONF_ENABLE_AP_SENSORS, default=DEFAULT_ENABLE_AP_SENSORS): bool,
         vol.Optional(CONF_ENABLE_ETH_SENSORS, default=DEFAULT_ENABLE_ETH_SENSORS): bool,
+        vol.Optional(CONF_ENABLE_MWAN3_SENSORS, default=DEFAULT_ENABLE_MWAN3_SENSORS): bool,
+        vol.Optional(CONF_ENABLE_NLBWMON_SENSORS, default=DEFAULT_ENABLE_NLBWMON_SENSORS): bool,
         vol.Optional(CONF_ENABLE_SERVICE_CONTROLS, default=DEFAULT_ENABLE_SERVICE_CONTROLS): bool,
         vol.Optional(CONF_ENABLE_DEVICE_KICK_BUTTONS, default=DEFAULT_ENABLE_DEVICE_KICK_BUTTONS): bool,
+        vol.Optional(CONF_ENABLE_REBOOT_BUTTON, default=DEFAULT_ENABLE_REBOOT_BUTTON): bool,
+        vol.Optional(CONF_ENABLE_WIRELESS_TRACKERS, default=DEFAULT_ENABLE_WIRELESS_TRACKERS): bool,
+        vol.Optional(CONF_ENABLE_WIRED_TRACKER, default=DEFAULT_ENABLE_WIRED_TRACKER): bool,
         vol.Optional(CONF_ENABLE_WIRED_TRACKING, default=DEFAULT_ENABLE_WIRED_TRACKING): bool,
     }
 )
@@ -125,132 +156,68 @@ STEP_TIMEOUTS_DATA_SCHEMA = vol.Schema(
         vol.Optional(CONF_AP_SENSOR_TIMEOUT, default=DEFAULT_AP_SENSOR_TIMEOUT): vol.All(
             vol.Coerce(int), vol.Range(min=30, max=600)
         ),
+        vol.Optional(CONF_MWAN3_SENSOR_TIMEOUT, default=DEFAULT_MWAN3_SENSOR_TIMEOUT): vol.All(
+            vol.Coerce(int), vol.Range(min=30, max=600)
+        ),
         vol.Optional(CONF_SERVICE_TIMEOUT, default=DEFAULT_SERVICE_TIMEOUT): vol.All(
             vol.Coerce(int), vol.Range(min=10, max=300)
+        ),
+        vol.Optional(CONF_CONSIDER_HOME, default=DEFAULT_CONSIDER_HOME): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=1800)
         ),
     }
 )
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    """Validate the user input allows us to connect.
-
-    Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
-    """
-    # Get Home Assistant's HTTP client session
+    """Validate the user input allows us to connect."""
     session = async_get_clientsession(hass)
-
-    # Build URL using utility function
+    hostname = data[CONF_HOST]
     use_https = data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS)
     default_port = DEFAULT_HTTPS_PORT if use_https else DEFAULT_HTTP_PORT
     port = data.get(CONF_PORT, default_port)
     endpoint = (data.get(CONF_ENDPOINT, DEFAULT_ENDPOINT) or DEFAULT_ENDPOINT).strip("/")
-    url = build_ubus_url(data[CONF_HOST], use_https, port=port, endpoint=endpoint)
-
-    # Configure SSL verification
+    url = build_ubus_url(hostname, use_https, port=port, endpoint=endpoint)
     verify_ssl = data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
     cert_path = data.get(CONF_CERT_PATH)
 
-    # Debug configuration values
-    _LOGGER.debug("Configuration Debug [validate_input]:")
-    _LOGGER.debug("  use_https: %s, URL: %s", use_https, url)
-    _LOGGER.debug("SSL settings: verify_ssl=%s, cert_path=%s", verify_ssl, cert_path)
+    safe_log_data(data, "debug", "Attempting connection with these parameters (credentials redacted)")
 
-    # If using HTTPS with unverified SSL, warn user
-    if use_https and not verify_ssl:
-        _LOGGER.warning(
-            "HTTPS enabled with SSL verification disabled - "
-            "this is insecure but necessary for self-signed certificates"
-        )
-
-    safe_log_data(
-        data, "debug",
-        "Attempting connection with these parameters (credentials redacted)"
-    )
-
-    ubus = create_enhanced_ubus_client(
-        url,
-        data[CONF_USERNAME],
-        data[CONF_PASSWORD],
-        session=session,
-        verify_ssl=verify_ssl,
-        cert_file=cert_path
-    )
+    ubus = create_enhanced_ubus_client(url, hostname, data[CONF_USERNAME], data[CONF_PASSWORD], session=session, verify_ssl=verify_ssl, cert_file=cert_path)
 
     try:
-        # Test connection
-        _LOGGER.debug("Attempting to connect to %s", url)
-
         session_id = await ubus.connect()
-
         if session_id is None:
-            _LOGGER.error("=== CONNECTION FAILURE DETAILS ===")
-            _LOGGER.error("URL: %s", url)
-            _LOGGER.error("Username: %s", data[CONF_USERNAME])
-            _LOGGER.error("SSL Verification: %s", verify_ssl)
-            _LOGGER.error("Certificate Path: %s", cert_path)
-            _LOGGER.error("Session ID returned: %s", session_id)
-            _LOGGER.error("Possible causes:")
-            _LOGGER.error("1. Wrong username/password")
-            _LOGGER.error("2. User lacks ubus API permissions")
-            _LOGGER.error("3. ubus service not running on device")
-            _LOGGER.error("4. Network firewall blocking connection")
-            _LOGGER.error("5. SSL/TLS handshake failure (if HTTPS)")
-            _LOGGER.error("6. Device running different OpenWrt version")
-            _LOGGER.error("=== END FAILURE DETAILS ===")
             raise CannotConnect("Failed to connect to OpenWrt device - session_id is None")
-
-        _LOGGER.info("Successfully connected to OpenWrt device at %s", url)
-        # Note: session_id is sensitive, only log at debug level and redacted
-        _LOGGER.debug("Session established successfully")
-
     except ConnectionRefusedError as exc:
-        _LOGGER.error("Connection refused: OpenWrt device at %s is not accepting connections", data[CONF_HOST])
         raise CannotConnect("Connection refused - check if OpenWrt device is running and accessible") from exc
     except asyncio.TimeoutError as exc:
-        _LOGGER.error("Connection timeout: OpenWrt device at %s did not respond in time", data[CONF_HOST])
         raise CannotConnect("Connection timeout - check network connectivity") from exc
     except PermissionError as exc:
-        _LOGGER.error("Authentication failed: Invalid credentials for %s on %s", data[CONF_USERNAME], data[CONF_HOST])
         raise CannotConnect("Authentication failed - check username and password") from exc
     except Exception as exc:
-        _LOGGER.exception("Unexpected exception during connection test: %s", str(exc))
-        _LOGGER.error("Connection details - URL: %s, Verify SSL: %s, Cert Path: %s",
-                      url, verify_ssl, cert_path)
         raise CannotConnect(f"Failed to connect to OpenWrt device: {str(exc)}") from exc
     finally:
-        # Always close the session to prevent leaks
         await ubus.close()
 
-    # Return info that you want to store in the config entry.
     return {"title": f"OpenWrt ubus {data[CONF_HOST]}"}
 
 
 async def get_services_list(hass: HomeAssistant, data: dict[str, Any]) -> list[str]:
     """Get list of available services from OpenWrt."""
     session = async_get_clientsession(hass)
-
-    # Build URL using utility function
+    hostname = data[CONF_HOST]
     use_https = data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS)
     default_port = DEFAULT_HTTPS_PORT if use_https else DEFAULT_HTTP_PORT
     port = data.get(CONF_PORT, default_port)
     endpoint = (data.get(CONF_ENDPOINT, DEFAULT_ENDPOINT) or DEFAULT_ENDPOINT).strip("/")
-    url = build_ubus_url(data[CONF_HOST], use_https, port=port, endpoint=endpoint)
-
-    # Configure SSL verification
+    url = build_ubus_url(hostname, use_https, port=port, endpoint=endpoint)
     verify_ssl = data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
     cert_path = data.get(CONF_CERT_PATH)
 
     _LOGGER.debug("Getting services list from %s", url)
 
-    ubus = create_enhanced_ubus_client(
-        url,
-        data[CONF_USERNAME],
-        data[CONF_PASSWORD],
-        session=session,
-        verify_ssl=verify_ssl,
-        cert_file=cert_path
-    )
+    ubus = create_enhanced_ubus_client(url, hostname, data[CONF_USERNAME], data[CONF_PASSWORD], session=session, verify_ssl=verify_ssl, cert_file=cert_path)
 
     try:
         session_id = await ubus.connect()
@@ -271,6 +238,95 @@ async def get_services_list(hass: HomeAssistant, data: dict[str, Any]) -> list[s
         await ubus.close()
 
 
+async def get_connected_wifi_devices(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, str]:
+    """Get list of connected WiFi devices from OpenWrt with hostname resolution."""
+    session = async_get_clientsession(hass)
+    hostname = data[CONF_HOST]
+    use_https = data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS)
+    default_port = DEFAULT_HTTPS_PORT if use_https else DEFAULT_HTTP_PORT
+    port = data.get(CONF_PORT, default_port)
+    endpoint = (data.get(CONF_ENDPOINT, DEFAULT_ENDPOINT) or DEFAULT_ENDPOINT).strip("/")
+    url = build_ubus_url(hostname, use_https, port=port, endpoint=endpoint)
+    verify_ssl = data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
+    cert_path = data.get(CONF_CERT_PATH)
+
+    ubus = create_enhanced_ubus_client(url, hostname, data[CONF_USERNAME], data[CONF_PASSWORD], session=session, verify_ssl=verify_ssl, cert_file=cert_path)
+    try:
+        session_id = await ubus.connect()
+        if session_id is None:
+            return {}
+
+        is_hostapd = data.get(CONF_WIRELESS_SOFTWARE, DEFAULT_WIRELESS_SOFTWARE) == "hostapd"
+        ap_devices_result = await ubus.get_ap_devices()
+        if not ap_devices_result:
+            return {}
+        ap_devices = ubus.parse_ap_devices(ap_devices_result)
+        if not ap_devices:
+            return {}
+
+        sta_data = await ubus.get_all_sta_data_batch(ap_devices, is_hostapd=is_hostapd)
+
+        all_macs = set()
+        if sta_data:
+            for ap_name, ap_sta_info in sta_data.items():
+                if isinstance(ap_sta_info, dict):
+                    for mac in ap_sta_info.get("devices", []):
+                        all_macs.add(str(mac).upper())
+
+        if not all_macs:
+            return {}
+
+        mac2name = {}
+        try:
+            ethers_mapping = await ubus.get_ethers_mapping()
+            if ethers_mapping:
+                for mac, info in ethers_mapping.items():
+                    mac2name[str(mac).upper()] = str(info.get("hostname", ""))
+
+            dhcp_software = data.get(CONF_DHCP_SOFTWARE, DEFAULT_DHCP_SOFTWARE)
+            if dhcp_software == "dnsmasq":
+                result = await ubus.get_uci_config("dhcp", "dnsmasq")
+                leasefile = "/tmp/dhcp.leases"
+                if result and "values" in result:
+                    values = result["values"].values()
+                    leasefile = next(iter(values), {}).get("leasefile", "/tmp/dhcp.leases")
+                lease_result = await ubus.file_read(leasefile)
+                if lease_result and "data" in lease_result:
+                    for line in lease_result["data"].splitlines():
+                        hosts = line.split(" ")
+                        if len(hosts) >= 4:
+                            mac_upper = hosts[1].upper()
+                            if mac_upper not in mac2name:
+                                mac2name[mac_upper] = hosts[3]
+            elif dhcp_software == "odhcpd":
+                result = await ubus.get_dhcp_method("ipv4leases")
+                if result and "device" in result:
+                    for device in result["device"].values():
+                        for lease in device.get("leases", []):
+                            mac = lease.get("mac", "")
+                            if mac and len(mac) == 12:
+                                mac = ":".join(mac[i: i + 2] for i in range(0, len(mac), 2))
+                                mac_upper = mac.upper()
+                                if mac_upper not in mac2name:
+                                    mac2name[mac_upper] = lease.get("hostname", "")
+        except Exception as exc:
+            _LOGGER.debug("Failed to get hostname mappings (non-fatal): %s", exc)
+
+        devices = {}
+        for mac_upper in all_macs:
+            hostname = mac2name.get(mac_upper, "")
+            if hostname and hostname != "*":
+                devices[mac_upper] = f"{hostname} ({mac_upper})"
+            else:
+                devices[mac_upper] = mac_upper
+        return devices
+    except Exception as exc:
+        _LOGGER.exception("Failed to get connected wifi devices: %s", exc)
+        return {}
+    finally:
+        await ubus.close()
+
+
 class OpenwrtUbusConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for openwrt ubus."""
 
@@ -282,6 +338,7 @@ class OpenwrtUbusConfigFlow(ConfigFlow, domain=DOMAIN):
         self._sensor_data: dict[str, Any] = {}
         self._services_data: dict[str, Any] = {}
         self._available_services: list[str] = []
+        self._available_sta_devices: dict[str, str] = {}
 
     @staticmethod
     @callback
@@ -323,6 +380,18 @@ class OpenwrtUbusConfigFlow(ConfigFlow, domain=DOMAIN):
         """Handle the sensor configuration step."""
         if user_input is not None:
             self._sensor_data = user_input
+
+            # If sta sensors enabled, proceed to selection config
+            if user_input.get(CONF_ENABLE_STA_SENSORS, DEFAULT_ENABLE_STA_SENSORS):
+                return await self.async_step_sta_sensors_config()
+
+            # If wireless tracker is enabled, proceed to wireless tracker configuration
+            if user_input.get(CONF_ENABLE_WIRELESS_TRACKERS, False):
+                return await self.async_step_wireless_tracker_config()
+
+            # If wired tracker is enabled, proceed to wired tracker configuration
+            if user_input.get(CONF_ENABLE_WIRED_TRACKER, False):
+                return await self.async_step_wired_tracker_config()
 
             # If service controls are enabled, proceed to services selection
             if user_input.get(CONF_ENABLE_SERVICE_CONTROLS, False):
@@ -378,11 +447,128 @@ class OpenwrtUbusConfigFlow(ConfigFlow, domain=DOMAIN):
             }
         )
 
+    async def async_step_sta_sensors_config(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle the station sensors device selection step."""
+        if user_input is not None:
+            self._sensor_data.update(user_input)
+
+            # If wireless tracker is enabled, proceed to wireless tracker configuration
+            if self._sensor_data.get(CONF_ENABLE_WIRELESS_TRACKERS, False):
+                return await self.async_step_wireless_tracker_config()
+
+            # If wired tracker is enabled, proceed to wired tracker configuration
+            if self._sensor_data.get(CONF_ENABLE_WIRED_TRACKER, False):
+                return await self.async_step_wired_tracker_config()
+
+            # If service controls are enabled, proceed to services selection
+            if self._sensor_data.get(CONF_ENABLE_SERVICE_CONTROLS, False):
+                return await self.async_step_services()
+
+            return await self.async_step_timeouts()
+
+        if not self._available_sta_devices:
+            self._available_sta_devices = await get_connected_wifi_devices(self.hass, self._connection_data)
+
+        sta_sensors_schema = vol.Schema(
+            {
+                vol.Required(CONF_SELECT_ALL_STA, default=DEFAULT_SELECT_ALL_STA): cv.boolean,
+                vol.Optional(CONF_SELECTED_STA, default=DEFAULT_SELECTED_STA): cv.multi_select(
+                    {mac: name for mac, name in self._available_sta_devices.items()}
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="sta_sensors_config",
+            data_schema=sta_sensors_schema,
+            description_placeholders={"host": self._connection_data[CONF_HOST]},
+        )
+
+    async def async_step_wireless_tracker_config(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle the wireless tracker configuration step."""
+        if user_input is not None:
+            self._sensor_data.update(user_input)
+            if CONF_WIRELESS_TRACKER_WHITELIST in self._sensor_data:
+                whitelist_str = self._sensor_data[CONF_WIRELESS_TRACKER_WHITELIST]
+                if isinstance(whitelist_str, str):
+                    self._sensor_data[CONF_WIRELESS_TRACKER_WHITELIST] = [
+                        item.strip() for item in whitelist_str.split(",") if item.strip()
+                    ]
+
+            # If wired tracker is enabled, proceed to wired tracker configuration
+            if self._sensor_data.get(CONF_ENABLE_WIRED_TRACKER, False):
+                return await self.async_step_wired_tracker_config()
+
+            # If service controls are enabled, proceed to services selection
+            if self._sensor_data.get(CONF_ENABLE_SERVICE_CONTROLS, False):
+                return await self.async_step_services()
+
+            return await self.async_step_timeouts()
+
+        wireless_tracker_schema = vol.Schema(
+            {
+                vol.Optional(CONF_WIRELESS_TRACKER_WHITELIST, default=""): cv.string,
+            }
+        )
+
+        return self.async_show_form(
+            step_id="wireless_tracker_config",
+            data_schema=wireless_tracker_schema,
+            description_placeholders={"host": self._connection_data[CONF_HOST]},
+        )
+
+    async def async_step_wired_tracker_config(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle the wired tracker configuration step."""
+        if user_input is not None:
+            self._sensor_data.update(user_input)
+
+            # If service controls are enabled, proceed to services selection
+            if self._sensor_data.get(CONF_ENABLE_SERVICE_CONTROLS, False):
+                return await self.async_step_services()
+
+            return await self.async_step_timeouts()
+
+        wired_tracker_schema = vol.Schema(
+            {
+                vol.Optional(CONF_WIRED_TRACKER_NAME_PRIORITY, default=DEFAULT_WIRED_TRACKER_NAME_PRIORITY): vol.In(
+                    ["ipv4", "ipv6", "mac"]
+                ),
+                vol.Optional(CONF_WIRED_TRACKER_WHITELIST, default=""): cv.string,
+                vol.Optional(CONF_WIRED_TRACKER_INTERFACES, default=""): cv.string,
+            }
+        )
+
+        return self.async_show_form(
+            step_id="wired_tracker_config",
+            data_schema=wired_tracker_schema,
+            description_placeholders={"host": self._connection_data[CONF_HOST]},
+        )
+
     async def async_step_timeouts(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle the timeout configuration step."""
         if user_input is not None:
+            # Process wired tracker whitelist and interfaces from comma-separated strings
+            if CONF_WIRED_TRACKER_WHITELIST in self._sensor_data:
+                whitelist_str = self._sensor_data[CONF_WIRED_TRACKER_WHITELIST]
+                if isinstance(whitelist_str, str):
+                    self._sensor_data[CONF_WIRED_TRACKER_WHITELIST] = [
+                        item.strip() for item in whitelist_str.split(",") if item.strip()
+                    ]
+            if CONF_WIRED_TRACKER_INTERFACES in self._sensor_data:
+                interfaces_str = self._sensor_data[CONF_WIRED_TRACKER_INTERFACES]
+                if isinstance(interfaces_str, str):
+                    self._sensor_data[CONF_WIRED_TRACKER_INTERFACES] = [
+                        item.strip() for item in interfaces_str.split(",") if item.strip()
+                    ]
+
             # Combine all configuration data
             config_data = {
                 **self._connection_data,
@@ -410,6 +596,8 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
         """Initialize options flow."""
         super().__init__()
         self._available_services: list[str] = []
+        self._available_sta_devices: dict[str, str] = {}
+        self._temp_data: dict[str, Any] = {}
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -441,9 +629,44 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
             if user_input.get("refresh_services", False):
                 return await self.async_step_services()
 
+            # Process wireless tracker whitelist string into list
+            if CONF_WIRELESS_TRACKER_WHITELIST in user_input:
+                whitelist_str = user_input.get(CONF_WIRELESS_TRACKER_WHITELIST, "")
+                if whitelist_str:
+                    user_input[CONF_WIRELESS_TRACKER_WHITELIST] = [
+                        prefix.strip() for prefix in whitelist_str.split(",") if prefix.strip()
+                    ]
+                else:
+                    user_input[CONF_WIRELESS_TRACKER_WHITELIST] = []
+
+            # Process wired tracker whitelist string into list
+            if CONF_WIRED_TRACKER_WHITELIST in user_input:
+                whitelist_str = user_input.get(CONF_WIRED_TRACKER_WHITELIST, "")
+                if whitelist_str:
+                    user_input[CONF_WIRED_TRACKER_WHITELIST] = [
+                        prefix.strip() for prefix in whitelist_str.split(",") if prefix.strip()
+                    ]
+                else:
+                    user_input[CONF_WIRED_TRACKER_WHITELIST] = []
+
+            # Process interfaces string into list
+            if CONF_WIRED_TRACKER_INTERFACES in user_input:
+                interfaces_str = user_input.get(CONF_WIRED_TRACKER_INTERFACES, "")
+                if interfaces_str:
+                    user_input[CONF_WIRED_TRACKER_INTERFACES] = [
+                        iface.strip() for iface in interfaces_str.split(",") if iface.strip()
+                    ]
+                else:
+                    user_input[CONF_WIRED_TRACKER_INTERFACES] = []
+
             # Get current data and merge with new options
             new_data = dict(self.config_entry.data)
             new_data.update(user_input)
+            self._temp_data = user_input
+
+            # If sta sensors enabled, proceed to selection config
+            if user_input.get(CONF_ENABLE_STA_SENSORS, DEFAULT_ENABLE_STA_SENSORS):
+                return await self.async_step_sta_sensors_config()
 
             # Update the config entry with new data
             self.hass.config_entries.async_update_entry(
@@ -460,28 +683,29 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
         options_schema = vol.Schema(
             {
                 vol.Optional(
+                    CONF_USE_HTTPS, default=current_data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS)
+                ): bool,
+                vol.Optional(
+                    CONF_PORT, default=current_data.get(CONF_PORT, DEFAULT_HTTPS_PORT if current_data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS) else DEFAULT_HTTP_PORT)
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
+                vol.Optional(
+                    CONF_VERIFY_SSL, default=current_data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
+                ): bool,
+                vol.Optional(
+                    CONF_ENDPOINT, default=current_data.get(CONF_ENDPOINT, DEFAULT_ENDPOINT)
+                ): str,
+                vol.Optional(
                     CONF_WIRELESS_SOFTWARE,
                     default=current_data.get(CONF_WIRELESS_SOFTWARE, DEFAULT_WIRELESS_SOFTWARE)
                 ): vol.In(WIRELESS_SOFTWARES),
                 vol.Optional(
-                    CONF_TRACKING_METHOD,
-                    default=current_data.get(CONF_TRACKING_METHOD, DEFAULT_TRACKING_METHOD)
-                ): vol.In(TRACKING_METHODS),
-                vol.Optional(
-                    CONF_PORT,
-                    default=current_data.get(
-                        CONF_PORT,
-                        DEFAULT_HTTPS_PORT if current_data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS) else DEFAULT_HTTP_PORT,
-                    )
-                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
-                vol.Optional(
-                    CONF_ENDPOINT,
-                    default=current_data.get(CONF_ENDPOINT, DEFAULT_ENDPOINT)
-                ): str,
-                vol.Optional(
                     CONF_DHCP_SOFTWARE,
                     default=current_data.get(CONF_DHCP_SOFTWARE, DEFAULT_DHCP_SOFTWARE)
                 ): vol.In(DHCP_SOFTWARES),
+                vol.Optional(
+                    CONF_TRACKING_METHOD,
+                    default=current_data.get(CONF_TRACKING_METHOD, DEFAULT_TRACKING_METHOD)
+                ): vol.In(TRACKING_METHODS),
                 vol.Optional(
                     CONF_ENABLE_SYSTEM_SENSORS,
                     default=current_data.get(CONF_ENABLE_SYSTEM_SENSORS, DEFAULT_ENABLE_SYSTEM_SENSORS)
@@ -503,6 +727,14 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
                     default=current_data.get(CONF_ENABLE_ETH_SENSORS, DEFAULT_ENABLE_ETH_SENSORS)
                 ): bool,
                 vol.Optional(
+                    CONF_ENABLE_MWAN3_SENSORS,
+                    default=current_data.get(CONF_ENABLE_MWAN3_SENSORS, DEFAULT_ENABLE_MWAN3_SENSORS)
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_NLBWMON_SENSORS,
+                    default=current_data.get(CONF_ENABLE_NLBWMON_SENSORS, DEFAULT_ENABLE_NLBWMON_SENSORS)
+                ): bool,
+                vol.Optional(
                     CONF_ENABLE_SERVICE_CONTROLS,
                     default=current_data.get(CONF_ENABLE_SERVICE_CONTROLS, DEFAULT_ENABLE_SERVICE_CONTROLS)
                 ): bool,
@@ -510,6 +742,34 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
                     CONF_ENABLE_DEVICE_KICK_BUTTONS,
                     default=current_data.get(CONF_ENABLE_DEVICE_KICK_BUTTONS, DEFAULT_ENABLE_DEVICE_KICK_BUTTONS)
                 ): bool,
+                vol.Optional(
+                    CONF_ENABLE_REBOOT_BUTTON,
+                    default=current_data.get(CONF_ENABLE_REBOOT_BUTTON, DEFAULT_ENABLE_REBOOT_BUTTON)
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_WIRELESS_TRACKERS,
+                    default=current_data.get(CONF_ENABLE_WIRELESS_TRACKERS, DEFAULT_ENABLE_WIRELESS_TRACKERS)
+                ): bool,
+                vol.Optional(
+                    CONF_WIRELESS_TRACKER_WHITELIST,
+                    description={"suggested_value": ",".join(current_data.get(CONF_WIRELESS_TRACKER_WHITELIST, []))},
+                ): str,
+                vol.Optional(
+                    CONF_ENABLE_WIRED_TRACKER,
+                    default=current_data.get(CONF_ENABLE_WIRED_TRACKER, DEFAULT_ENABLE_WIRED_TRACKER)
+                ): bool,
+                vol.Optional(
+                    CONF_WIRED_TRACKER_NAME_PRIORITY,
+                    default=current_data.get(CONF_WIRED_TRACKER_NAME_PRIORITY, DEFAULT_WIRED_TRACKER_NAME_PRIORITY)
+                ): vol.In(["ipv4", "ipv6", "mac"]),
+                vol.Optional(
+                    CONF_WIRED_TRACKER_WHITELIST,
+                    description={"suggested_value": ",".join(current_data.get(CONF_WIRED_TRACKER_WHITELIST, []))},
+                ): str,
+                vol.Optional(
+                    CONF_WIRED_TRACKER_INTERFACES,
+                    description={"suggested_value": ",".join(current_data.get(CONF_WIRED_TRACKER_INTERFACES, []))},
+                ): str,
                 vol.Optional(
                     CONF_ENABLE_WIRED_TRACKING,
                     default=current_data.get(CONF_ENABLE_WIRED_TRACKING, DEFAULT_ENABLE_WIRED_TRACKING)
@@ -531,9 +791,17 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
                     default=current_data.get(CONF_AP_SENSOR_TIMEOUT, DEFAULT_AP_SENSOR_TIMEOUT)
                 ): vol.All(vol.Coerce(int), vol.Range(min=30, max=600)),
                 vol.Optional(
+                    CONF_MWAN3_SENSOR_TIMEOUT,
+                    default=current_data.get(CONF_MWAN3_SENSOR_TIMEOUT, DEFAULT_MWAN3_SENSOR_TIMEOUT)
+                ): vol.All(vol.Coerce(int), vol.Range(min=30, max=600)),
+                vol.Optional(
                     CONF_SERVICE_TIMEOUT,
                     default=current_data.get(CONF_SERVICE_TIMEOUT, DEFAULT_SERVICE_TIMEOUT)
                 ): vol.All(vol.Coerce(int), vol.Range(min=10, max=300)),
+                vol.Optional(
+                    CONF_CONSIDER_HOME,
+                    default=current_data.get(CONF_CONSIDER_HOME, DEFAULT_CONSIDER_HOME)
+                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=1800)),
                 vol.Optional("refresh_services", default=False): bool,
             }
         )
@@ -580,11 +848,16 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
 
         # Create multi-select schema for services
         current_services = self.config_entry.data.get(CONF_SELECTED_SERVICES, [])
+        options_dict = {service: service for service in (self._available_services or [])}
+        for svc in current_services:
+            if svc not in options_dict:
+                options_dict[svc] = f"{svc} (not found on router)"
+
         services_schema = vol.Schema({})
-        if self._available_services:
+        if options_dict:
             services_schema = vol.Schema({
                 vol.Optional(CONF_SELECTED_SERVICES, default=current_services): cv.multi_select(
-                    {service: service for service in self._available_services}
+                    options_dict
                 ),
             })
 
@@ -596,6 +869,40 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
                 "host": self.config_entry.data[CONF_HOST],
                 "services_count": str(len(self._available_services)) if self._available_services else "0"
             }
+        )
+
+    async def async_step_sta_sensors_config(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle station sensors device selection in the options flow."""
+        if user_input is not None:
+            config_data = {**self._temp_data, **user_input}
+            self.hass.config_entries.async_update_entry(self.config_entry, data=dict(self.config_entry.data, **config_data))
+            await self.hass.config_entries.async_reload(self.config_entry.entry_id)
+            return self.async_create_entry(title="", data={})
+
+        if not self._available_sta_devices:
+            self._available_sta_devices = await get_connected_wifi_devices(self.hass, self.config_entry.data)
+
+        current_selected = self.config_entry.data.get(CONF_SELECTED_STA, [])
+        for mac in current_selected:
+            if mac not in self._available_sta_devices:
+                self._available_sta_devices[mac] = f"Offline Device ({mac})"
+
+        current_data = self.config_entry.data
+        sta_sensors_schema = vol.Schema(
+            {
+                vol.Required(CONF_SELECT_ALL_STA, default=current_data.get(CONF_SELECT_ALL_STA, DEFAULT_SELECT_ALL_STA)): cv.boolean,
+                vol.Optional(CONF_SELECTED_STA, default=current_selected): cv.multi_select(
+                    {mac: name for mac, name in self._available_sta_devices.items()}
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="sta_sensors_config",
+            data_schema=sta_sensors_schema,
+            description_placeholders={"host": self.config_entry.data[CONF_HOST]},
         )
 
 

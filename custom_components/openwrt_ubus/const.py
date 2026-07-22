@@ -1,6 +1,6 @@
 """Constants for the openwrt_ubus integration."""
 
-from homeassistant.const import Platform
+from homeassistant.const import Platform, CONF_IP_ADDRESS
 
 DOMAIN = "openwrt_ubus"
 PLATFORMS = [Platform.DEVICE_TRACKER, Platform.SENSOR, Platform.SWITCH, Platform.BUTTON]
@@ -23,7 +23,7 @@ DEFAULT_HTTPS_PORT = 443
 DEFAULT_ENDPOINT = "ubus"
 TRACKING_METHODS = ["combined", "uniqueid"]
 DEFAULT_TRACKING_METHOD = "combined"
-DHCP_SOFTWARES = ["dnsmasq", "odhcpd", "none"]
+DHCP_SOFTWARES = ["dnsmasq", "odhcpd", "ethers", "none"]
 WIRELESS_SOFTWARES = ["hostapd", "iwinfo", "none"]
 
 # Device kick constants
@@ -37,16 +37,32 @@ CONF_ENABLE_SYSTEM_SENSORS = "enable_system_sensors"
 CONF_ENABLE_AP_SENSORS = "enable_ap_sensors"
 CONF_ENABLE_ETH_SENSORS = "enable_eth_sensors"
 CONF_ENABLE_SERVICE_CONTROLS = "enable_service_controls"
+CONF_ENABLE_MWAN3_SENSORS = "enable_mwan3_sensors"
+CONF_ENABLE_NLBWMON_SENSORS = "enable_nlbwmon_sensors"
 
 CONF_ENABLE_DEVICE_KICK_BUTTONS = "enable_device_kick_buttons"
+CONF_ENABLE_REBOOT_BUTTON = "enable_reboot_button"
 CONF_ENABLE_WIRED_TRACKING = "enable_wired_tracking"
 CONF_SELECTED_SERVICES = "selected_services"
+
+# Wired device tracker configuration
+CONF_ENABLE_WIRED_TRACKER = "enable_wired_tracker"
+CONF_WIRED_TRACKER_NAME_PRIORITY = "wired_tracker_name_priority"
+CONF_WIRED_TRACKER_WHITELIST = "wired_tracker_whitelist"
+CONF_WIRED_TRACKER_INTERFACES = "wired_tracker_interfaces"
+# Wireless device tracker configuration
+CONF_ENABLE_WIRELESS_TRACKERS = "enable_wireless_trackers"
+CONF_WIRELESS_TRACKER_WHITELIST = "wireless_tracker_whitelist"
+# STA sensor selection
+CONF_SELECT_ALL_STA = "select_all_sta"
+CONF_SELECTED_STA = "selected_sta"
 
 # Timeout configuration
 CONF_SYSTEM_SENSOR_TIMEOUT = "system_sensor_timeout"
 CONF_QMODEM_SENSOR_TIMEOUT = "qmodem_sensor_timeout"
 CONF_STA_SENSOR_TIMEOUT = "sta_sensor_timeout"
 CONF_AP_SENSOR_TIMEOUT = "ap_sensor_timeout"
+CONF_MWAN3_SENSOR_TIMEOUT = "mwan3_sensor_timeout"
 CONF_SERVICE_TIMEOUT = "service_timeout"
 
 # Default values
@@ -55,16 +71,33 @@ DEFAULT_ENABLE_STA_SENSORS = True
 DEFAULT_ENABLE_SYSTEM_SENSORS = True
 DEFAULT_ENABLE_AP_SENSORS = True
 DEFAULT_ENABLE_ETH_SENSORS = True
+DEFAULT_ENABLE_MWAN3_SENSORS = True
 DEFAULT_ENABLE_SERVICE_CONTROLS = False
+DEFAULT_ENABLE_NLBWMON_SENSORS = False
 
 DEFAULT_ENABLE_DEVICE_KICK_BUTTONS = False
+DEFAULT_ENABLE_REBOOT_BUTTON = True
 DEFAULT_ENABLE_WIRED_TRACKING = False
 DEFAULT_SELECTED_SERVICES = []
 DEFAULT_SYSTEM_SENSOR_TIMEOUT = 30
 DEFAULT_QMODEM_SENSOR_TIMEOUT = 120
 DEFAULT_STA_SENSOR_TIMEOUT = 30
 DEFAULT_AP_SENSOR_TIMEOUT = 60
+DEFAULT_MWAN3_SENSOR_TIMEOUT = 60
 DEFAULT_SERVICE_TIMEOUT = 30
+
+# Wired device tracker defaults
+DEFAULT_ENABLE_WIRED_TRACKER = False
+DEFAULT_WIRED_TRACKER_NAME_PRIORITY = "ipv4"
+DEFAULT_WIRED_TRACKER_WHITELIST = []
+DEFAULT_WIRED_TRACKER_INTERFACES = []
+DEFAULT_ENABLE_WIRELESS_TRACKERS = False
+DEFAULT_SELECT_ALL_STA = False
+DEFAULT_SELECTED_STA = []
+
+# Consider home configuration
+CONF_CONSIDER_HOME = "consider_home"
+DEFAULT_CONSIDER_HOME = 300
 
 # API constants - moved from Ubus/const.py
 API_RPC_CALL = "call"
@@ -83,8 +116,10 @@ API_SUBSYS_IWINFO = "iwinfo"
 API_SUBSYS_SYSTEM = "system"
 API_SUBSYS_UCI = "uci"
 API_SUBSYS_QMODEM = "modem_ctrl"
+API_SUBSYS_MWAN3 = "mwan3"
 API_SUBSYS_RC = "rc"
 API_SUBSYS_LUCI_RPC = "luci-rpc"
+API_SUBSYS_WIRELESS = "network.wireless"
 
 # API methods
 API_METHOD_BOARD = "board"
@@ -93,6 +128,7 @@ API_METHOD_GET_AP = "devices"
 API_METHOD_GET_CLIENTS = "get_clients"
 API_METHOD_GET_STA = "assoclist"
 API_METHOD_GET_QMODEM = "info"
+API_METHOD_GET_MWAN3 = "status"
 API_METHOD_INFO = "info"
 API_METHOD_READ = "read"
 API_METHOD_REBOOT = "reboot"
@@ -100,11 +136,25 @@ API_METHOD_DEL_CLIENT = "del_client"
 API_METHOD_LIST = "list"
 API_METHOD_INIT = "init"
 API_METHOD_GET_HOST_HINTS = "getHostHints"
+API_METHOD_SET = "set"
+API_METHOD_COMMIT = "commit"
+API_METHOD_EXEC = "exec"
+
+
+def _build_host_port(target: str, use_https: bool, port: int | None) -> str:
+    """Build host:port string, omitting port if it's the default."""
+    if port is None:
+        return target
+    default_port = DEFAULT_HTTPS_PORT if use_https else DEFAULT_HTTP_PORT
+    if port == default_port:
+        return target
+    return f"{target}:{port}"
 
 
 def build_ubus_url(
     host: str,
     use_https: bool = False,
+    ip_address: str | None = None,
     port: int | None = None,
     endpoint: str | None = None,
 ) -> str:
@@ -113,21 +163,25 @@ def build_ubus_url(
     Args:
         host: The hostname or IP address of the OpenWrt device
         use_https: Whether to use HTTPS (default: False)
+        ip_address: Optional IP address to use instead of hostname for connection
         port: Optional custom port (default: 443 for HTTPS, 80 for HTTP)
         endpoint: Optional ubus endpoint path (default: "ubus")
 
     Returns:
         The complete ubus API URL
     """
-    protocol = "https" if use_https else "http"
-    if port is None:
-        port = DEFAULT_HTTPS_PORT if use_https else DEFAULT_HTTP_PORT
-    endpoint = endpoint.strip("/") if endpoint else DEFAULT_ENDPOINT
+    scheme = "https" if use_https else "http"
+    target = ip_address if ip_address else host
+    host_port = _build_host_port(target, use_https, port)
+    ep = endpoint.strip("/") if endpoint else DEFAULT_ENDPOINT
+    return f"{scheme}://{host_port}/{ep}"
 
-    # Only include port in URL if it's non-standard
-    if (use_https and port == DEFAULT_HTTPS_PORT) or (not use_https and port == DEFAULT_HTTP_PORT):
-        return f"{protocol}://{host}/{endpoint}"
-    return f"{protocol}://{host}:{port}/{endpoint}"
+
+def build_configuration_url(host: str, use_https: bool = False, port: int | None = None) -> str:
+    """Build the configuration URL for device info."""
+    scheme = "https" if use_https else "http"
+    host_port = _build_host_port(host, use_https, port)
+    return f"{scheme}://{host_port}"
 
 
 def get_config_value(entry, key: str, default):

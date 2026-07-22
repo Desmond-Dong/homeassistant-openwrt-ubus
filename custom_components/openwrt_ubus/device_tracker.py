@@ -26,11 +26,18 @@ from .const import (
     CONF_DHCP_SOFTWARE,
     CONF_WIRELESS_SOFTWARE,
     CONF_ENABLE_WIRED_TRACKING,
+    CONF_ENABLE_WIRED_TRACKER,
+    CONF_ENABLE_WIRELESS_TRACKERS,
+    CONF_WIRELESS_TRACKER_WHITELIST,
     CONF_TRACKING_METHOD,
+    CONF_CONSIDER_HOME,
     DEFAULT_DHCP_SOFTWARE,
     DEFAULT_WIRELESS_SOFTWARE,
     DEFAULT_ENABLE_WIRED_TRACKING,
+    DEFAULT_ENABLE_WIRED_TRACKER,
+    DEFAULT_ENABLE_WIRELESS_TRACKERS,
     DEFAULT_TRACKING_METHOD,
+    DEFAULT_CONSIDER_HOME,
     DHCP_SOFTWARES,
     DOMAIN,
     get_config_value,
@@ -82,9 +89,12 @@ async def async_setup_entry(
     data_manager_key = f"data_manager_{entry.entry_id}"
     data_manager = hass.data[DOMAIN][data_manager_key]
 
-    # Check if wired tracking is enabled
-    enable_wired = get_config_value(entry, CONF_ENABLE_WIRED_TRACKING, DEFAULT_ENABLE_WIRED_TRACKING)
+    # Check if wired tracking is enabled (support both old and new config keys)
+    enable_wired = get_config_value(entry, CONF_ENABLE_WIRED_TRACKING, DEFAULT_ENABLE_WIRED_TRACKING) or get_config_value(entry, CONF_ENABLE_WIRED_TRACKER, DEFAULT_ENABLE_WIRED_TRACKER)
+    enable_wireless_trackers = get_config_value(entry, CONF_ENABLE_WIRELESS_TRACKERS, DEFAULT_ENABLE_WIRELESS_TRACKERS)
+    wireless_whitelist = get_config_value(entry, CONF_WIRELESS_TRACKER_WHITELIST, [])
     tracking_method = get_config_value(entry, CONF_TRACKING_METHOD, DEFAULT_TRACKING_METHOD)
+    consider_home = get_config_value(entry, CONF_CONSIDER_HOME, DEFAULT_CONSIDER_HOME)
 
     # Determine data types to fetch
     data_types = ["device_statistics"]
@@ -106,7 +116,10 @@ async def async_setup_entry(
     coordinator.async_add_entities = async_add_entities
     coordinator.mac2name = {}  # For storing DHCP mappings
     coordinator.enable_wired = enable_wired  # Store wired tracking setting
+    coordinator.enable_wireless_trackers = enable_wireless_trackers
+    coordinator.wireless_whitelist = wireless_whitelist
     coordinator.tracking_method = tracking_method
+    coordinator.consider_home = consider_home
     coordinator.restored_connection_types = {}
 
     # Initialize known_devices from existing entity registry entries
@@ -122,9 +135,20 @@ async def async_setup_entry(
         current_devices = set()
 
         # Get wireless devices from device_statistics
-        if "device_statistics" in coordinator.data:
+        if coordinator.enable_wireless_trackers and "device_statistics" in coordinator.data:
             device_stats = coordinator.data["device_statistics"]
-            current_devices.update(device_stats.keys())
+            if coordinator.wireless_whitelist:
+                for mac, device_info in device_stats.items():
+                    ip_address = device_info.get("ip", "")
+                    mac_upper = mac.upper()
+                    if any(
+                        mac_upper.startswith(prefix.upper()) or
+                        (ip_address and ip_address.startswith(prefix))
+                        for prefix in coordinator.wireless_whitelist
+                    ):
+                        current_devices.add(mac)
+            else:
+                current_devices.update(device_stats.keys())
 
         # Get wired devices if enabled
         if coordinator.enable_wired and "wired_devices" in coordinator.data:
@@ -157,9 +181,20 @@ async def async_setup_entry(
 
     if coordinator.data:
         # Get wireless devices
-        if coordinator.data.get("device_statistics"):
+        if coordinator.enable_wireless_trackers and coordinator.data.get("device_statistics"):
             device_stats = coordinator.data["device_statistics"]
-            device_macs.update(device_stats.keys())
+            if coordinator.wireless_whitelist:
+                for mac, device_info in device_stats.items():
+                    ip_address = device_info.get("ip", "")
+                    mac_upper = mac.upper()
+                    if any(
+                        mac_upper.startswith(prefix.upper()) or
+                        (ip_address and ip_address.startswith(prefix))
+                        for prefix in coordinator.wireless_whitelist
+                    ):
+                        device_macs.add(mac)
+            else:
+                device_macs.update(device_stats.keys())
 
         # Get wired devices if enabled
         if coordinator.enable_wired and coordinator.data.get("wired_devices"):
@@ -353,6 +388,8 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
         self._last_wireless_seen: datetime | None = None
         self._last_seen_at: datetime | None = None
         self._last_device_data: dict | None = None
+        self._consider_home = timedelta(seconds=consider_home) if consider_home > 0 else timedelta()
+        self._last_seen: datetime | None = None
 
     def _get_device_data(self) -> tuple[dict | None, str]:
         """Get device data from coordinator, checking both wireless and wired sources.
@@ -514,10 +551,17 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
 
         if device_data:
             connected = device_data.get("connected", False)
+            if connected:
+                self._last_seen = datetime.now()
+            elif self._consider_home and self._last_seen:
+                if datetime.now() - self._last_seen < self._consider_home:
+                    connected = True
             _LOGGER.debug("Device %s (%s) connection status: %s", self.mac_address, connection_type, connected)
             return connected
 
         _LOGGER.debug("Device %s not found in device data, assuming disconnected", self.mac_address)
+        if self._consider_home and self._last_seen:
+            return datetime.now() - self._last_seen < self._consider_home
         return False
 
     @property

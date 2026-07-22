@@ -15,13 +15,25 @@ from .const import (
     CONF_ENABLE_SYSTEM_SENSORS,
     CONF_ENABLE_AP_SENSORS,
     CONF_ENABLE_ETH_SENSORS,
+    CONF_ENABLE_MWAN3_SENSORS,
+    CONF_ENABLE_NLBWMON_SENSORS,
     DEFAULT_ENABLE_QMODEM_SENSORS,
     DEFAULT_ENABLE_STA_SENSORS,
     DEFAULT_ENABLE_SYSTEM_SENSORS,
     DEFAULT_ENABLE_AP_SENSORS,
     DEFAULT_ENABLE_ETH_SENSORS,
+    DEFAULT_ENABLE_MWAN3_SENSORS,
+    DEFAULT_ENABLE_NLBWMON_SENSORS,
 )
-from .sensors import system_sensor, qmodem_sensor, sta_sensor, ap_sensor, eth_sensor
+from .sensors import (
+    system_sensor,
+    qmodem_sensor,
+    sta_sensor,
+    ap_sensor,
+    eth_sensor,
+    mwan3_sensor,
+    nlbwmon_sensor,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,10 +64,22 @@ SENSOR_MODULES = [
         "name": "ap_sensor"
     },
     {
+        "module": mwan3_sensor,
+        "config_key": CONF_ENABLE_MWAN3_SENSORS,
+        "default": DEFAULT_ENABLE_MWAN3_SENSORS,
+        "name": "mwan3_sensor"
+    },
+    {
         "module": eth_sensor,
         "config_key": CONF_ENABLE_ETH_SENSORS,
         "default": DEFAULT_ENABLE_ETH_SENSORS,
         "name": "eth_sensor"
+    },
+    {
+        "module": nlbwmon_sensor,
+        "config_key": CONF_ENABLE_NLBWMON_SENSORS,
+        "default": DEFAULT_ENABLE_NLBWMON_SENSORS,
+        "name": "nlbwmon_sensor"
     },
 ]
 

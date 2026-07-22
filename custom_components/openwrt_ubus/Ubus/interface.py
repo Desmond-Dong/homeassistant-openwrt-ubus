@@ -3,10 +3,11 @@
 import asyncio
 import json
 import logging
+import time
+from typing import Any
 
 import aiohttp
 
-from ..security_utils import redact_sensitive_data
 from .const import (
     API_DEF_DEBUG,
     API_DEF_SESSION_ID,
@@ -14,24 +15,47 @@ from .const import (
     API_DEF_VERIFY,
     API_ERROR,
     API_MESSAGE,
-    API_METHOD_DESTROY,
     API_METHOD_LOGIN,
+    API_METHOD_DESTROY,
     API_PARAM_PASSWORD,
     API_PARAM_USERNAME,
     API_RESULT,
     API_RPC_CALL,
-    API_RPC_ID,
     API_RPC_VERSION,
     API_SUBSYS_SESSION,
     API_UBUS_RPC_SESSION,
+    API_UBUS_RPC_SESSION_EXPIRES,
+    API_SESSION_METHOD_LIST,
     HTTP_STATUS_OK,
     UBUS_ERROR_SUCCESS,
     UBUS_ERROR_PERMISSION_DENIED,
     UBUS_ERROR_NOT_FOUND,
     UBUS_ERROR_NO_DATA,
+    _get_error_message,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class PreparedCall:
+    def __init__(
+        self,
+        rpc_method: str,
+        subsystem: str | None = None,
+        method: str | None = None,
+        params: dict | None = None,
+        rpc_id: str | None = None,
+    ):
+        self.rpc_method = rpc_method
+        self.subsystem = subsystem
+        self.method = method
+        self.params = params
+        self.id = rpc_id
+
+
+class RPCError(RuntimeError):
+    """Custom exception for RPC errors."""
+    pass
 
 
 class Ubus:
@@ -39,378 +63,196 @@ class Ubus:
 
     def __init__(
         self,
-        host,
+        url,
+        hostname: str,
         username,
         password,
-        session=None,
-        timeout=API_DEF_TIMEOUT,
-        verify=API_DEF_VERIFY,
-        cert_file=None,
+        session: aiohttp.ClientSession,
+        timeout,
+        verify,
     ):
-        """Init OpenWrt ubus API."""
-        self.host = host
+        self.url = url
+        self.hostname = hostname
         self.username = username
         self.password = password
-        self.session = session  # Session will be provided externally
+        self.session = session
         self.timeout = timeout
         self.verify = verify
-        self.cert_file = cert_file
 
         self.debug_api = API_DEF_DEBUG
-        self.rpc_id = API_RPC_ID
-        self.session_id = None
+        self.session_id: str | None = None
+        self.session_expire = 0
         self._session_created_internally = False
         self._connect_lock = asyncio.Lock()
 
     def set_session(self, session):
-        """Set the aiohttp session to use."""
         self.session = session
 
+    async def logout(self):
+        try:
+            await self._api_call(API_RPC_CALL, API_SUBSYS_SESSION, API_METHOD_DESTROY)
+        finally:
+            self.session_id = None
+            self.session_expire = 0
+
     def _ensure_session(self):
-        """Ensure we have a session, create one if needed."""
         if self.session is None:
             self.session = aiohttp.ClientSession()
             self._session_created_internally = True
 
-    def build_api(
-            self,
-            rpc_method: str,
-            subsystem: str = None,
-            method: str = None,
-            params: dict = None,
-    ):
-        """Build API call data."""
-        if self.debug_api:
-            # Redact sensitive information from params before logging
-            safe_params = redact_sensitive_data(params) if params else {}
-            _LOGGER.debug(
-                'api build: rpc_method="%s" subsystem="%s" method="%s" params="%s"',
-                rpc_method,
-                subsystem,
-                method,
-                safe_params,
-            )
+    async def _ensure_session_is_valid(self):
+        if self.session_expire <= (time.time() - 15):
+            async with self._connect_lock:
+                if self.session_expire <= (time.time() - 15):
+                    await self.connect()
 
-        _params = [self.session_id, subsystem]
-        if rpc_method == API_RPC_CALL:
-            if method:
-                _params.append(method)
+    async def api_call(self, rpc_method, subsystem=None, method=None, params=None) -> dict | list | None:
+        await self._ensure_session_is_valid()
+        return await self._api_call(rpc_method, subsystem, method, params)
 
-            if params:
-                _params.append(params)
-            else:
-                _params.append({})
+    async def batch_call(self, rpcs: list[PreparedCall]) -> list[tuple[str, dict | list | None | Exception]] | None:
+        await self._ensure_session_is_valid()
+        return await self._batch_call(rpcs)
 
-        data = json.dumps(
-            {
-                "jsonrpc": API_RPC_VERSION,
-                "id": self.rpc_id,
-                "method": rpc_method,
-                "params": _params,
-            }
-        )
-        self.rpc_id += 1
-        return data
-
-    async def batch_call(self, rpcs: list[dict]):
-        """Execute multiple API calls in a single batch request."""
+    async def _batch_call(self, rpcs: list[PreparedCall]) -> list[tuple[str, dict | list | None | Exception]] | None:
         self._ensure_session()
 
-        try:
-            response = await self.session.post(
-                self.host, data=json.dumps(rpcs), timeout=self.timeout, verify_ssl=self.verify
-            )
-        except aiohttp.ClientError as req_exc:
-            _LOGGER.error("batch_call exception: %s", req_exc)
-            return None
+        if rpcs[0] and rpcs[0].subsystem != API_SUBSYS_SESSION:
+            rpcs.append(PreparedCall(rpc_method=API_RPC_CALL, subsystem=API_SUBSYS_SESSION, method=API_SESSION_METHOD_LIST, rpc_id="refresh_expiration"))
+
+        rpc_calls = []
+        for rpc in rpcs:
+            params: list[Any] = [self.session_id or API_DEF_SESSION_ID, rpc.subsystem]
+            if rpc.rpc_method == API_RPC_CALL:
+                if rpc.method:
+                    params.append(rpc.method)
+                params.append(rpc.params if rpc.params else {})
+            rpc_call = {"jsonrpc": API_RPC_VERSION, "method": rpc.rpc_method, "params": params}
+            if rpc.id is not None:
+                rpc_call["id"] = rpc.id
+            rpc_calls.append(rpc_call)
+
+        response = None
+        retries_left = 5
+        while retries_left > 0:
+            try:
+                response = await self.session.post(
+                    url=self.url, server_hostname=self.hostname,
+                    data=json.dumps(rpc_calls), timeout=self.timeout, verify_ssl=self.verify,
+                )
+                break
+            except aiohttp.ClientConnectionError as e:
+                _LOGGER.warning("Connection error when calling API: %s", e)
+                retries_left -= 1
+                if retries_left == 0:
+                    raise ConnectionError(f"Failed to connect to API after multiple attempts: {e}")
+                _LOGGER.debug("Retrying API call... (%d retries left)", retries_left)
+                await asyncio.sleep(5 - retries_left)
+            except Exception as e:
+                _LOGGER.error("Unexpected error when calling API: %s", e)
+                raise ConnectionError(f"Unexpected error when calling API: {e}")
 
         if response.status != HTTP_STATUS_OK:
             return None
 
-        json_response = await response.json()
+        responses = await response.json()
 
-        if self.debug_api:
-            # Redact sensitive information from response before logging
-            safe_response = redact_sensitive_data(json_response)
-            _LOGGER.debug(
-                'batch call: status="%s" response="%s"',
-                response.status,
-                safe_response,
-            )
+        if isinstance(responses, list):
+            results: list[tuple[str, dict | list | None | Exception]] = []
+            for i, response in enumerate(responses):
+                result_id = response.get("id", "")
 
-        # For batch calls, the response is typically an array of responses
-        if isinstance(json_response, list):
-            # Check first result for permission error to handle batch-level permissions
-            if json_response and len(json_response) > 0:
-                first_result = json_response[0]
-                if "error" in first_result:
-                    error_msg = first_result["error"].get("message", "")
-                    if "Access denied" in error_msg:
-                        raise PermissionError(error_msg)
-            return json_response
+                def _append_result(_result):
+                    results.append((result_id, _result))
 
-        # Handle single response format (fallback)
-        if API_ERROR in json_response:
-            error_message = json_response[API_ERROR].get(API_MESSAGE, "Unknown error")
-            error_code = json_response[API_ERROR].get("code", -1)
+                if API_ERROR in response:
+                    subsystem = rpcs[i].subsystem
+                    method = rpcs[i].method
+                    error_message = response[API_ERROR].get(API_MESSAGE, "Unknown error")
+                    error_code = response[API_ERROR].get("code", -1)
 
-            # Special handling for permission errors
-            if error_code == -32002 or "Access denied" in error_message:
-                _LOGGER.warning(
-                    "Permission denied in batch call: %s (code: %d)",
-                    error_message,
-                    error_code
-                )
-                raise PermissionError(
-                    f"Permission denied in batch call: {error_message} (code: {error_code})"
-                )
-
-            # General error handling
-            _LOGGER.error(
-                "Batch API call failed: %s (code: %d)",
-                error_message,
-                error_code
-            )
-            raise ConnectionError(
-                f"Batch API call failed: {error_message} (code: {error_code})"
-            )
-        return [json_response]
-
-    async def api_call(
-        self,
-        rpc_method,
-        subsystem=None,
-        method=None,
-        params: dict | None = None,
-    ):
-        """Perform API call."""
-        # Ensure we have a session
-        self._ensure_session()
-
-        if self.debug_api:
-            # Redact sensitive information from params before logging
-            safe_params = redact_sensitive_data(params) if params else {}
-            _LOGGER.debug(
-                'api call: rpc_method="%s" subsystem="%s" method="%s" params="%s"',
-                rpc_method,
-                subsystem,
-                method,
-                safe_params,
-            )
-
-        _params = [self.session_id, subsystem]
-        if rpc_method == API_RPC_CALL:
-            if method:
-                _params.append(method)
-
-            if params:
-                _params.append(params)
-            else:
-                _params.append({})
-
-        data = json.dumps(
-            {
-                "jsonrpc": API_RPC_VERSION,
-                "id": self.rpc_id,
-                "method": rpc_method,
-                "params": _params,
-            }
-        )
-        if self.debug_api:
-            # Redact sensitive information from debug data
-            try:
-                parsed_data = json.loads(data)
-                safe_data = redact_sensitive_data(parsed_data)
-                _LOGGER.debug('api call: data="%s"', json.dumps(safe_data))
-            except (json.JSONDecodeError, Exception):
-                # If parsing fails, log a generic message without the actual data
-                _LOGGER.debug('api call: data="[JSON_DATA_REDACTED]"')
-
-        self.rpc_id += 1
-        try:
-            # Make the request using the session
-            # SSL verification is handled at the session level
-            response = await self.session.post(
-                self.host, data=data, timeout=self.timeout,
-                allow_redirects=False  # Disable automatic redirects to catch HTTP->HTTPS redirects
-            )
-        except aiohttp.ClientError as req_exc:
-            _LOGGER.error("api_call exception: %s", req_exc)
-            # Handle SSL certificate errors specifically
-            if "SSL" in str(req_exc) or "certificate" in str(req_exc).lower():
-                _LOGGER.error(
-                    "SSL Certificate Error: This is usually caused by "
-                    "using HTTPS with a self-signed certificate."
-                )
-                _LOGGER.error(
-                    "Try using HTTP instead of HTTPS, or disable SSL "
-                    "verification if using self-signed certificates."
-                )
-                _LOGGER.error(
-                    "Current configuration: host=%s, verify_ssl=%s",
-                    self.host, self.verify
-                )
-                _LOGGER.error(
-                    "This suggests the device is forcing HTTPS redirection "
-                    "even when HTTP is requested."
-                )
-            return None
-
-        if response.status != HTTP_STATUS_OK:
-            return None
-
-        json_response = await response.json()
-
-        if self.debug_api:
-            # Redact sensitive information from response before logging
-            safe_response = redact_sensitive_data(json_response)
-            _LOGGER.debug(
-                'api call: status="%s" response="%s"',
-                response.status,
-                safe_response,
-            )
-
-        if API_ERROR in json_response:
-            error_message = json_response[API_ERROR].get(API_MESSAGE, "Unknown error")
-            error_code = json_response[API_ERROR].get("code", -1)
-
-            # Special handling for permission errors
-            if error_code == -32002 or "Access denied" in error_message:
-                _LOGGER.warning(
-                    "Permission denied when calling %s.%s: %s (code: %d)",
-                    subsystem,
-                    method,
-                    error_message,
-                    error_code
-                )
-                raise PermissionError(
-                    f"Permission denied for {subsystem}.{method}: {error_message} (code: {error_code})"
-                )
-
-            # General error handling
-            _LOGGER.error(
-                "API call failed for %s.%s: %s (code: %d)",
-                subsystem,
-                method,
-                error_message,
-                error_code
-            )
-            raise ConnectionError(
-                f"API call failed for {subsystem}.{method}: {error_message} (code: {error_code})"
-            )
-
-        if rpc_method == API_RPC_CALL:
-            try:
-                result = json_response[API_RESULT]
-                if isinstance(result, list) and len(result) > 1:
-                    # Check if first element is an error code
-                    error_code = result[0]
-                    if error_code == UBUS_ERROR_SUCCESS:
-                        # Success - return the data
-                        return result[1]
+                    if error_code == -32002 or "Access denied" in error_message:
+                        _LOGGER.warning("Permission denied when calling %s.%s: %s [session_id: %s]", subsystem, method, error_message, self.session_id)
+                        _append_result(PermissionError(f"Permission denied for {subsystem}.{method}: {error_message} (code: {error_code})"))
                     else:
-                        # Error code - log with descriptive message and return None
-                        error_msg = self._get_error_message(error_code)
-                        _LOGGER.debug("API call failed with error code %s (%s): %s",
-                                      error_code, error_msg, result[1] if len(result) > 1 else "No error message")
-                        return None
-                elif isinstance(result, list) and len(result) == 1:
-                    # Single element result - might be an error code
-                    error_code = result[0]
-                    error_msg = self._get_error_message(error_code)
-                    _LOGGER.debug("API call failed with error code %s (%s) - no error message", error_code, error_msg)
-                    return None
+                        _LOGGER.error("API call failed for %s.%s: %s (code: %d) [session_id: %s]", subsystem, method, error_message, error_code, self.session_id)
+                        _append_result(ConnectionError(f"API call failed for {subsystem}.{method}: {error_message} (code: {error_code})"))
                 else:
-                    _LOGGER.debug("Unexpected result format: %s", result)
-                    return None
-            except (IndexError, KeyError) as exc:
-                _LOGGER.debug("Error parsing API result: %s", exc)
-                return None
-        else:
-            return json_response[API_RESULT]
+                    result = response[API_RESULT]
+                    if rpcs[i].rpc_method == API_RPC_CALL:
+                        if isinstance(result, list):
+                            error_code = result[0]
+                            error_msg = _get_error_message(error_code)
+                            if len(result) == 2:
+                                if error_code == UBUS_ERROR_SUCCESS:
+                                    _append_result(result[1])
+                                else:
+                                    _append_result(RPCError(f"API call failed with error code {error_code} ({error_msg}): {result[1]}"))
+                            elif len(result) == 1:
+                                if error_code == UBUS_ERROR_SUCCESS:
+                                    _append_result(None)
+                                else:
+                                    _append_result(RPCError(f"API call failed with error code {error_code} ({error_msg}): No error message"))
+                            else:
+                                _append_result(ConnectionError(f"Unexpected API call result format: {result}"))
+                        else:
+                            _append_result(ConnectionError(f"Unexpected API call result format: {result}"))
+                    else:
+                        _append_result(result)
+            if results[-1][0] == "refresh_expiration":
+                session_response = results.pop()[1]
+                if isinstance(session_response, Exception):
+                    try:
+                        raise session_response
+                    except (RPCError, PermissionError) as e:
+                        _LOGGER.warning("Failed to retrieve session expiration: %s [session_id: %s]", e, self.session_id)
+                elif isinstance(session_response, dict):
+                    self.session_expire = time.time() + session_response.get("expires", 0)
 
-    def _get_error_message(self, error_code):
-        """Get descriptive error message for ubus error codes."""
-        error_messages = {
-            UBUS_ERROR_SUCCESS: "Success",
-            UBUS_ERROR_PERMISSION_DENIED: "Permission Denied",
-            UBUS_ERROR_NOT_FOUND: "Not Found",
-            UBUS_ERROR_NO_DATA: "No Data",
-        }
-        return error_messages.get(error_code, f"Unknown Error ({error_code})")
+            return results
+        else:
+            raise ConnectionError(f"Unexpected API response format: {responses}")
+
+    async def _api_call(self, rpc_method, subsystem=None, method=None, params=None) -> dict | list | None:
+        results = await self._batch_call([PreparedCall(rpc_method=rpc_method, subsystem=subsystem, method=method, params=params)])
+        if results is None:
+            return None
+        _, response = results[0]
+        if isinstance(response, Exception):
+            raise response
+        return response
 
     def api_debugging(self, debug_api):
-        """Enable/Disable API calls debugging."""
         self.debug_api = debug_api
         return self.debug_api
 
     def https_verify(self, verify):
-        """Enable/Disable HTTPS verification."""
         self.verify = verify
         return self.verify
 
     async def connect(self):
-        """Connect to OpenWrt ubus API."""
-        async with self._connect_lock:
-            previous_session_id = self.session_id
+        if self.session_id is not None:
+            try:
+                await self._api_call(API_RPC_CALL, API_SUBSYS_SESSION, API_METHOD_DESTROY)
+            except Exception:
+                pass
 
-            if previous_session_id and previous_session_id != API_DEF_SESSION_ID:
-                try:
-                    await self.logout()
-                except Exception as exc:
-                    _LOGGER.debug("Failed to destroy previous ubus session before reconnect: %s", exc)
+        self.session_expire = 0
+        self.session_id = None
 
-            self.rpc_id = 1
-            self.session_id = API_DEF_SESSION_ID
-
-            _LOGGER.debug("Starting ubus connection to host: %s", self.host)
-            _LOGGER.debug("Authenticating with username: %s", self.username)
-
-            login = await self.api_call(
-                API_RPC_CALL,
-                API_SUBSYS_SESSION,
-                API_METHOD_LOGIN,
-                {
-                    API_PARAM_USERNAME: self.username,
-                    API_PARAM_PASSWORD: self.password,
-                },
-            )
-
-            _LOGGER.debug("Login response received: %s", "REDACTED" if login else "None")
-
-            if login and API_UBUS_RPC_SESSION in login:
-                self.session_id = login[API_UBUS_RPC_SESSION]
-                _LOGGER.debug("Authentication successful, received session_id: %s",
-                              "VALID_SESSION" if self.session_id else "INVALID_SESSION")
-            else:
-                self.session_id = None
-                _LOGGER.error("Authentication failed - login response: %s",
-                              "Empty response" if not login else f"Missing {API_UBUS_RPC_SESSION} key")
-                if login:
-                    _LOGGER.error(
-                        "Login response keys: %s", list(
-                            login.keys()) if isinstance(
-                            login, dict) else "Not a dict")
-
-            return self.session_id
-
-    async def logout(self):
-        """Destroy the current rpcd session if one exists."""
-        if not self.session_id or self.session_id == API_DEF_SESSION_ID:
-            return
-
-        try:
-            await self.api_call(
-                API_RPC_CALL,
-                API_SUBSYS_SESSION,
-                API_METHOD_DESTROY,
-                {},
-            )
-        finally:
+        login = await self._api_call(API_RPC_CALL, API_SUBSYS_SESSION, API_METHOD_LOGIN, {
+            API_PARAM_USERNAME: self.username,
+            API_PARAM_PASSWORD: self.password,
+        })
+        if login and API_UBUS_RPC_SESSION in login:
+            self.session_id = login[API_UBUS_RPC_SESSION]
+            self.session_expire = time.time() + int(login.get(API_UBUS_RPC_SESSION_EXPIRES, 300))
+        else:
             self.session_id = None
 
+        return self.session_id
+
     async def close(self):
-        """Destroy the rpcd session and close any internally-created HTTP session."""
         try:
             await self.logout()
         except Exception as exc:

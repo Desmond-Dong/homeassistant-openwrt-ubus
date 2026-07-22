@@ -27,10 +27,39 @@
           "enable_sta_sensors": "Enable Station (WiFi Device) Sensors",
           "enable_ap_sensors": "Enable Access Point Sensors",
           "enable_eth_sensors": "Enable Network Interface Sensors",
+          "enable_mwan3_sensors": "Enable MWAN3 Sensors",
+          "enable_nlbwmon_sensors": "Enable NLBWMon Top Hosts Sensor",
           "enable_service_controls": "Enable Service Controls",
           "enable_device_kick_buttons": "Enable Device Kick Buttons (requires hostapd)",
-          "enable_wired_tracking": "Enable Wired Device Tracking",
+          "enable_reboot_button": "Enable Reboot Button",
+          "enable_wireless_trackers": "Enable Wireless Device Trackers",
+          "enable_wired_tracker": "Enable Wired Device Tracker",
+          "enable_wired_tracking": "Enable Wired Device Tracking (legacy)",
           "tracking_method": "Tracking Method"
+        }
+      },
+      "sta_sensors_config": {
+        "title": "OpenWrt ubus - WiFi Device Selection",
+        "description": "Select which WiFi devices to create sensors for on {host}",
+        "data": {
+          "select_all_sta": "Create sensors for all connected devices",
+          "selected_sta": "Select specific devices"
+        }
+      },
+      "wireless_tracker_config": {
+        "title": "OpenWrt ubus - Wireless Tracker Configuration",
+        "description": "Configure wireless device tracker settings for {host}",
+        "data": {
+          "wireless_tracker_whitelist": "MAC Prefix Whitelist (comma-separated)"
+        }
+      },
+      "wired_tracker_config": {
+        "title": "OpenWrt ubus - Wired Tracker Configuration",
+        "description": "Configure wired device tracker settings for {host}",
+        "data": {
+          "wired_tracker_name_priority": "Name Priority",
+          "wired_tracker_whitelist": "IP/MAC Prefix Whitelist (comma-separated)",
+          "wired_tracker_interfaces": "Interface Filter (comma-separated)"
         }
       },
       "services": {
@@ -46,7 +75,11 @@
         "data": {
           "system_sensor_timeout": "System Sensor Update Interval (seconds)",
           "qmodem_sensor_timeout": "QModem Sensor Update Interval (seconds)",
-          "sta_sensor_timeout": "Station Sensor Update Interval (seconds)"
+          "sta_sensor_timeout": "Station Sensor Update Interval (seconds)",
+          "ap_sensor_timeout": "AP Sensor Update Interval (seconds)",
+          "mwan3_sensor_timeout": "MWAN3 Sensor Update Interval (seconds)",
+          "service_timeout": "Service Status Update Interval (seconds)",
+          "consider_home": "Consider Home Delay (seconds)"
         }
       }
     },
@@ -79,24 +112,37 @@
         "title": "OpenWrt ubus Configuration",
         "description": "Configure sensors, timeouts and software settings for {host}",
         "data": {
-          "wireless_software": "Wireless Software",
-          "tracking_method": "Tracking Method",
+          "use_https": "Use HTTPS",
           "port": "Port",
+          "verify_ssl": "Verify SSL Certificate",
           "endpoint": "API Endpoint",
+          "wireless_software": "Wireless Software",
           "dhcp_software": "DHCP Software",
+          "tracking_method": "Tracking Method",
           "enable_system_sensors": "Enable System Sensors",
           "enable_qmodem_sensors": "Enable QModem Sensors",
           "enable_sta_sensors": "Enable Station (WiFi Device) Sensors",
           "enable_ap_sensors": "Enable Access Point Sensors",
           "enable_eth_sensors": "Enable Network Interface Sensors",
+          "enable_mwan3_sensors": "Enable MWAN3 Sensors",
+          "enable_nlbwmon_sensors": "Enable NLBWMon Top Hosts Sensor",
           "enable_service_controls": "Enable Service Controls",
           "enable_device_kick_buttons": "Enable Device Kick Buttons",
-          "enable_wired_tracking": "Enable Wired Device Tracking",
+          "enable_reboot_button": "Enable Reboot Button",
+          "enable_wireless_trackers": "Enable Wireless Device Trackers",
+          "wireless_tracker_whitelist": "Wireless Tracker MAC Prefix Whitelist",
+          "enable_wired_tracker": "Enable Wired Device Tracker",
+          "wired_tracker_name_priority": "Wired Tracker Name Priority",
+          "wired_tracker_whitelist": "Wired Tracker IP/MAC Prefix Whitelist",
+          "wired_tracker_interfaces": "Wired Tracker Interface Filter",
+          "enable_wired_tracking": "Enable Wired Device Tracking (legacy)",
           "system_sensor_timeout": "System Sensor Update Interval (seconds)",
           "qmodem_sensor_timeout": "QModem Sensor Update Interval (seconds)",
           "sta_sensor_timeout": "Station Sensor Update Interval (seconds)",
           "ap_sensor_timeout": "AP Sensor Update Interval (seconds)",
+          "mwan3_sensor_timeout": "MWAN3 Sensor Update Interval (seconds)",
           "service_timeout": "Service Status Update Interval (seconds)",
+          "consider_home": "Consider Home Delay (seconds)",
           "refresh_services": "Refresh Services List"
         }
       },
@@ -318,6 +364,18 @@
     "scan_devices": {
       "name": "Scan devices",
       "description": "Manually trigger a device scan on the OpenWrt router"
+    },
+    "uci_get": {
+      "name": "UCI Get",
+      "description": "Read a UCI configuration option from the OpenWrt router"
+    },
+    "uci_set_commit": {
+      "name": "UCI Set & Commit",
+      "description": "Set a UCI option value and immediately commit the change"
+    },
+    "uci_network_interface": {
+      "name": "UCI Network Interface",
+      "description": "Call a network.interface ubus method"
     }
   }
 }

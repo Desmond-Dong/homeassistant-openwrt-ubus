@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta
 from functools import wraps
+import json
 import logging
 from typing import Any, Dict
 
@@ -14,14 +15,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .ubus_client import create_enhanced_extended_ubus_client
 from .extended_ubus import ExtendedUbus
 from .const import (
     CONF_DHCP_SOFTWARE,
     CONF_WIRELESS_SOFTWARE,
     CONF_USE_HTTPS,
     CONF_VERIFY_SSL,
-    CONF_CERT_PATH,
     CONF_PORT,
     CONF_ENDPOINT,
     CONF_SYSTEM_SENSOR_TIMEOUT,
@@ -29,9 +28,14 @@ from .const import (
     CONF_STA_SENSOR_TIMEOUT,
     CONF_AP_SENSOR_TIMEOUT,
     CONF_SERVICE_TIMEOUT,
+    CONF_MWAN3_SENSOR_TIMEOUT,
     CONF_ENABLE_WIRED_TRACKING,
+    CONF_ENABLE_MWAN3_SENSORS,
+    CONF_ENABLE_NLBWMON_SENSORS,
+    CONF_WIRED_TRACKER_NAME_PRIORITY,
+    CONF_WIRED_TRACKER_WHITELIST,
+    CONF_WIRED_TRACKER_INTERFACES,
     DEFAULT_USE_HTTPS,
-    DEFAULT_VERIFY_SSL,
     DEFAULT_HTTP_PORT,
     DEFAULT_HTTPS_PORT,
     DEFAULT_ENDPOINT,
@@ -40,7 +44,12 @@ from .const import (
     DEFAULT_STA_SENSOR_TIMEOUT,
     DEFAULT_AP_SENSOR_TIMEOUT,
     DEFAULT_SERVICE_TIMEOUT,
+    DEFAULT_MWAN3_SENSOR_TIMEOUT,
     DEFAULT_ENABLE_WIRED_TRACKING,
+    DEFAULT_WIRED_TRACKER_NAME_PRIORITY,
+    DEFAULT_WIRED_TRACKER_WHITELIST,
+    DEFAULT_WIRED_TRACKER_INTERFACES,
+    API_DEF_TIMEOUT,
     build_ubus_url,
     get_config_value,
 )
@@ -107,6 +116,7 @@ class SharedUbusDataManager:
         self.entry = entry
         self._data_cache: Dict[str, Dict[str, Any]] = {}
         self._last_update: Dict[str, datetime] = {}
+        self._interface_to_ssid = {}  # Cache for interface->SSID mapping
 
         # Get timeout values from configuration (priority: options > data > default)
         system_timeout = get_config_value(entry, CONF_SYSTEM_SENSOR_TIMEOUT, DEFAULT_SYSTEM_SENSOR_TIMEOUT)
@@ -114,6 +124,7 @@ class SharedUbusDataManager:
         sta_timeout = get_config_value(entry, CONF_STA_SENSOR_TIMEOUT, DEFAULT_STA_SENSOR_TIMEOUT)
         ap_timeout = get_config_value(entry, CONF_AP_SENSOR_TIMEOUT, DEFAULT_AP_SENSOR_TIMEOUT)
         service_timeout = get_config_value(entry, CONF_SERVICE_TIMEOUT, DEFAULT_SERVICE_TIMEOUT)
+        mwan3_timeout = get_config_value(entry, CONF_MWAN3_SENSOR_TIMEOUT, DEFAULT_MWAN3_SENSOR_TIMEOUT)
 
         self._update_intervals: Dict[str, timedelta] = {
             "system_info": timedelta(seconds=system_timeout),
@@ -132,6 +143,8 @@ class SharedUbusDataManager:
             "system_temperatures": timedelta(seconds=system_timeout),  # System temperature sensors
             "dhcp_clients_count": timedelta(seconds=sta_timeout),  # DHCP clients count
             "network_devices": timedelta(seconds=system_timeout),  # Network device status
+            "mwan3_status": timedelta(seconds=mwan3_timeout),
+            "nlbwmon_top_hosts": timedelta(seconds=60),
         }
         self._update_locks: Dict[str, asyncio.Lock] = {
             key: asyncio.Lock() for key in self._update_intervals
@@ -147,34 +160,24 @@ class SharedUbusDataManager:
             if self._session is None:
                 self._session = async_get_clientsession(self.hass)
 
-            # Build URL using utility function
+            hostname = self.entry.data[CONF_HOST]
             use_https = get_config_value(self.entry, CONF_USE_HTTPS, DEFAULT_USE_HTTPS)
-            port = get_config_value(
-                self.entry,
-                CONF_PORT,
-                DEFAULT_HTTPS_PORT if use_https else DEFAULT_HTTP_PORT,
-            )
+            port = get_config_value(self.entry, CONF_PORT, DEFAULT_HTTPS_PORT if use_https else DEFAULT_HTTP_PORT)
             endpoint = get_config_value(self.entry, CONF_ENDPOINT, DEFAULT_ENDPOINT)
-            url = build_ubus_url(self.entry.data[CONF_HOST], use_https, port=port, endpoint=endpoint)
-
+            url = build_ubus_url(hostname, use_https, port=port, endpoint=endpoint)
             username = self.entry.data[CONF_USERNAME]
             password = self.entry.data[CONF_PASSWORD]
 
-            # Get SSL verification settings
-            verify_ssl = get_config_value(self.entry, CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
-            cert_path = get_config_value(self.entry, CONF_CERT_PATH, None)
-
-            # Use enhanced client factory for proper SSL handling
-            client = create_enhanced_extended_ubus_client(
+            client = ExtendedUbus(
                 url,
+                hostname,
                 username,
                 password,
                 session=self._session,
-                verify_ssl=verify_ssl,
-                cert_file=cert_path
+                timeout=API_DEF_TIMEOUT,
+                verify=get_config_value(self.entry, CONF_VERIFY_SSL, False),
             )
 
-            # Connect to the client
             try:
                 session_id = await client.connect()
                 if session_id is None:
@@ -200,6 +203,21 @@ class SharedUbusDataManager:
     async def get_ubus_connection_async(self) -> ExtendedUbus:
         """Get or create a ubus connection asynchronously."""
         return await self._get_ubus_client("default")
+
+    async def logout(self):
+        """Logout all ubus clients."""
+        for client in self._ubus_clients.values():
+            try:
+                await client.logout()
+            except Exception as exc:
+                _LOGGER.debug("Error logging out ubus client: %s", exc)
+
+    async def _get_interface_to_ssid_mapping(self):
+        """Get mapping of interface names to SSIDs."""
+        if not self._interface_to_ssid:
+            client = await self._get_ubus_client()
+            self._interface_to_ssid = await client.get_interface_to_ssid_mapping()
+        return self._interface_to_ssid
 
     async def _should_update(self, data_type: str) -> bool:
         """Check if data should be updated based on interval."""
@@ -466,6 +484,15 @@ class SharedUbusDataManager:
         mac2name = {}
         client = await self._get_ubus_client()
 
+        # Get mappings from /etc/ethers
+        try:
+            if dhcp_software == "ethers":
+                ethers_mapping = await client.get_ethers_mapping()
+                mac2name.update(ethers_mapping)
+                _LOGGER.debug("Loaded %d entries from /etc/ethers", len(ethers_mapping))
+        except Exception as exc:
+            _LOGGER.debug("Could not read /etc/ethers: %s", exc)
+
         try:
             if dhcp_software == "dnsmasq":
                 # Get dnsmasq lease file location
@@ -480,10 +507,12 @@ class SharedUbusDataManager:
                         for line in lease_result["data"].splitlines():
                             hosts = line.split(" ")
                             if len(hosts) >= 4:
-                                mac2name[hosts[1].upper()] = {
-                                    "hostname": hosts[3],
-                                    "ip": hosts[2]
-                                }
+                                mac_upper = hosts[1].upper()
+                                if mac_upper not in mac2name:
+                                    mac2name[mac_upper] = {
+                                        "hostname": hosts[3],
+                                        "ip": hosts[2]
+                                    }
             elif dhcp_software == "odhcpd":
                 # Get odhcpd leases
                 result = await client.get_dhcp_method("ipv4leases")
@@ -494,10 +523,12 @@ class SharedUbusDataManager:
                             # Convert aabbccddeeff to aa:bb:cc:dd:ee:ff
                             if mac and len(mac) == 12:
                                 mac = ":".join(mac[i:i + 2] for i in range(0, len(mac), 2))
-                                mac2name[mac.upper()] = {
-                                    "hostname": lease.get("hostname", ""),
-                                    "ip": lease.get("ip", "")
-                                }
+                                mac_upper = mac.upper()
+                                if mac_upper not in mac2name:
+                                    mac2name[mac_upper] = {
+                                        "hostname": lease.get("hostname", ""),
+                                        "ip": lease.get("ip", "")
+                                    }
         except Exception as exc:
             err_str = str(exc)
             if "Not Found" in err_str or "Method not found" in err_str:
@@ -585,20 +616,105 @@ class SharedUbusDataManager:
             raise UpdateFailed(f"Error fetching network devices: {exc}")
 
     @ubus_auto_reconnect(max_retries=1)
-    async def _fetch_wired_devices(self) -> Dict[str, Any]:
-        """Fetch wired devices from ARP table, excluding wireless devices.
+    async def _fetch_mwan3_status(self) -> Dict[str, Any]:
+        """Fetch MWAN3 status information if available."""
+        client = await self._get_ubus_client("mwan3")
+        try:
+            mwan3_status = await client.get_mwan3_status()
+            _LOGGER.debug("MWAN3 data fetched successfully")
+            return {"mwan3_status": mwan3_status}
+        except Exception as exc:
+            _LOGGER.debug("Error fetching MWAN3 status: %s", exc)
+            return {"mwan3_status": None}
 
-        This method:
-        1. Gets all wireless device MACs from device_statistics
-        2. Gets ARP table entries combined with host hints
-        3. Filters out wireless MACs to get only wired devices
-        """
-        # Check if wired tracking is enabled
-        enable_wired = get_config_value(
-            self.entry, CONF_ENABLE_WIRED_TRACKING, DEFAULT_ENABLE_WIRED_TRACKING
-        )
+    @ubus_auto_reconnect(max_retries=1)
+    async def _fetch_nlbwmon_top_hosts(self) -> Dict[str, Any]:
+        """Fetch top hosts by bandwidth usage using nlbwmon."""
+        client = await self._get_ubus_client("nlbwmon")
+        try:
+            dhcp_software = get_config_value(self.entry, CONF_DHCP_SOFTWARE, "dnsmasq")
+            mac2name = await self._get_mac2name_mapping(dhcp_software)
+
+            result = await client.file_exec(
+                "/usr/sbin/nlbw",
+                ["-c", "json", "-g", "ip,mac", "-o", "-rx_bytes,-tx_bytes"],
+            )
+            stdout = result.get("stdout", "") if isinstance(result, dict) else ""
+            if not stdout:
+                return {"nlbwmon_top_hosts": {"top_hosts": [], "host_count": 0, "total_rx_bytes": 0, "total_tx_bytes": 0}}
+
+            payload = json.loads(stdout)
+            columns = payload.get("columns", [])
+            rows = payload.get("data", [])
+            column_map = {name: index for index, name in enumerate(columns)}
+
+            required_columns = {"ip", "mac", "conns", "rx_bytes", "tx_bytes"}
+            if not required_columns.issubset(column_map):
+                raise UpdateFailed(f"Unexpected nlbwmon columns: {columns}")
+
+            hosts = {}
+            total_rx_bytes = 0
+            total_tx_bytes = 0
+
+            for row in rows:
+                mac = str(row[column_map["mac"]] or "").upper()
+                ip_address = str(row[column_map["ip"]] or "")
+                rx_bytes = int(row[column_map["rx_bytes"]] or 0)
+                tx_bytes = int(row[column_map["tx_bytes"]] or 0)
+                conns = int(row[column_map["conns"]] or 0)
+
+                if mac == "00:00:00:00:00:00" and not ip_address:
+                    continue
+
+                host_key = mac if mac and mac != "00:00:00:00:00:00" else ip_address
+                if not host_key:
+                    continue
+
+                host = hosts.setdefault(host_key, {
+                    "mac": mac if mac != "00:00:00:00:00:00" else None,
+                    "ip": None, "hostname": None, "connections": 0, "rx_bytes": 0, "tx_bytes": 0,
+                })
+                if ip_address and (host["ip"] is None or ":" not in ip_address):
+                    host["ip"] = ip_address
+                if host["mac"] and host["mac"] in mac2name:
+                    host["hostname"] = mac2name[host["mac"]].get("hostname") or host["hostname"]
+                    if not host["ip"]:
+                        host["ip"] = mac2name[host["mac"]].get("ip")
+                host["connections"] += conns
+                host["rx_bytes"] += rx_bytes
+                host["tx_bytes"] += tx_bytes
+                total_rx_bytes += rx_bytes
+                total_tx_bytes += tx_bytes
+
+            ranked_hosts = []
+            for host in hosts.values():
+                total_bytes = host["rx_bytes"] + host["tx_bytes"]
+                if total_bytes <= 0:
+                    continue
+                hostname = host["hostname"] or host["ip"] or host["mac"] or "Unknown"
+                ranked_hosts.append({
+                    "hostname": hostname, "ip": host["ip"], "mac": host["mac"],
+                    "connections": host["connections"], "rx_bytes": host["rx_bytes"],
+                    "tx_bytes": host["tx_bytes"], "total_bytes": total_bytes,
+                })
+            ranked_hosts.sort(key=lambda item: item["total_bytes"], reverse=True)
+
+            return {"nlbwmon_top_hosts": {
+                "top_hosts": ranked_hosts[:5], "host_count": len(ranked_hosts),
+                "total_rx_bytes": total_rx_bytes, "total_tx_bytes": total_tx_bytes,
+            }}
+        except Exception as exc:
+            if "Permission Denied" in str(exc) or "Access denied" in str(exc):
+                _LOGGER.warning("nlbwmon data requires ubus file.exec permission for '/usr/sbin/nlbw'")
+            else:
+                _LOGGER.error("Error fetching nlbwmon top hosts: %s", exc)
+            return {"nlbwmon_top_hosts": {"top_hosts": [], "host_count": 0, "total_rx_bytes": 0, "total_tx_bytes": 0}}
+
+    @ubus_auto_reconnect(max_retries=1)
+    async def _fetch_wired_devices(self) -> Dict[str, Any]:
+        """Fetch wired devices from IP neighbor table, excluding wireless devices."""
+        enable_wired = get_config_value(self.entry, CONF_ENABLE_WIRED_TRACKING, DEFAULT_ENABLE_WIRED_TRACKING)
         if not enable_wired:
-            _LOGGER.debug("Wired device tracking is disabled")
             return {"wired_devices": {}}
 
         client = await self._get_ubus_client()
@@ -609,17 +725,76 @@ class SharedUbusDataManager:
                 device_stats = self._data_cache["device_statistics"]
                 if isinstance(device_stats, dict):
                     wireless_macs = set(device_stats.keys())
-                    _LOGGER.debug("Found %d wireless MACs to exclude", len(wireless_macs))
 
-            # Get wired devices using the extended ubus method
-            wired_devices = await client.get_wired_devices(wireless_macs)
+            neighbors = await client.get_ip_neighbors()
+            if isinstance(neighbors, dict) and neighbors.get("error") == "permission_denied":
+                _LOGGER.warning("Wired device tracking requires ubus file.exec permission")
+                return {"wired_devices": {}}
 
-            _LOGGER.debug("Found %d wired devices", len(wired_devices))
+            name_priority = get_config_value(self.entry, CONF_WIRED_TRACKER_NAME_PRIORITY, DEFAULT_WIRED_TRACKER_NAME_PRIORITY)
+            whitelist = get_config_value(self.entry, CONF_WIRED_TRACKER_WHITELIST, DEFAULT_WIRED_TRACKER_WHITELIST)
+            interface_filter = get_config_value(self.entry, CONF_WIRED_TRACKER_INTERFACES, DEFAULT_WIRED_TRACKER_INTERFACES)
+
+            if not whitelist and not interface_filter:
+                _LOGGER.warning("Wired device tracker is enabled without any filters")
+
+            dhcp_software = get_config_value(self.entry, CONF_DHCP_SOFTWARE, "dnsmasq")
+            mac2name = await self._get_mac2name_mapping(dhcp_software)
+
+            wired_devices = {}
+            for ip_version in ["ipv4", "ipv6"]:
+                for neighbor in neighbors.get(ip_version, []):
+                    mac = neighbor.get("mac")
+                    if not mac or mac in wireless_macs:
+                        continue
+                    if interface_filter and neighbor.get("interface") not in interface_filter:
+                        continue
+                    if whitelist and not self._matches_whitelist(neighbor, mac, whitelist):
+                        continue
+
+                    if mac not in wired_devices:
+                        wired_devices[mac] = {
+                            "mac": mac, "ipv4": None, "ipv6": None,
+                            "interface": neighbor.get("interface"), "state": neighbor.get("state"),
+                            "connected": True, "connection_type": "wired", "ap_device": "LAN",
+                        }
+                    if ip_version == "ipv4":
+                        wired_devices[mac]["ipv4"] = neighbor.get("ip")
+                    else:
+                        wired_devices[mac]["ipv6"] = neighbor.get("ip")
+                    if neighbor.get("state") in ["REACHABLE", "PERMANENT"]:
+                        wired_devices[mac]["state"] = neighbor.get("state")
+
+            for mac, device in wired_devices.items():
+                hostname_data = mac2name.get(mac, {})
+                hostname = hostname_data.get("hostname", "")
+                if hostname:
+                    device["hostname"] = hostname
+                else:
+                    if name_priority == "ipv4" and device["ipv4"]:
+                        device["hostname"] = device["ipv4"]
+                    elif name_priority == "ipv6" and device["ipv6"]:
+                        device["hostname"] = device["ipv6"]
+                    else:
+                        device["hostname"] = device["ipv4"] or device["ipv6"] or mac.replace(":", "")
+
             return {"wired_devices": wired_devices}
-
         except Exception as exc:
             _LOGGER.error("Error fetching wired devices: %s", exc)
             return {"wired_devices": {}}
+
+    def _matches_whitelist(self, neighbor: dict, mac: str, whitelist: list) -> bool:
+        """Check if a neighbor matches any whitelist entry."""
+        if not whitelist:
+            return True
+        ip_addr = neighbor.get("ip", "")
+        for prefix in whitelist:
+            prefix = prefix.strip()
+            if not prefix:
+                continue
+            if ip_addr.startswith(prefix) or mac.upper().startswith(prefix.upper()):
+                return True
+        return False
 
     @ubus_auto_reconnect(max_retries=1)
     async def _fetch_system_data_batch(self, system_types: set) -> Dict[str, Any]:
@@ -691,6 +866,10 @@ class SharedUbusDataManager:
                     data = await self._fetch_network_devices()
                 elif data_type == "wired_devices":
                     data = await self._fetch_wired_devices()
+                elif data_type == "mwan3_status":
+                    data = await self._fetch_mwan3_status()
+                elif data_type == "nlbwmon_top_hosts":
+                    data = await self._fetch_nlbwmon_top_hosts()
                 else:
                     # Defensive: This should not happen due to the check above, but log just in case
                     _LOGGER.error(

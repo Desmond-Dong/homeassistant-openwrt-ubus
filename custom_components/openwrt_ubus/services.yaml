@@ -6,3 +6,95 @@ scan_devices:
   target:
     entity:
       integration: openwrt_ubus
+
+uci_get:
+  name: UCI Get
+  description: Read a UCI configuration option from the OpenWrt router
+  fields:
+    config:
+      name: Config
+      description: UCI config name (e.g. firewall, wireless, dhcp)
+      required: true
+      example: firewall
+      selector:
+        text:
+    section:
+      name: Section
+      description: Section name or type/index (e.g. block_user or @rule[3])
+      required: false
+      example: block_user
+      selector:
+        text:
+    option:
+      name: Option
+      description: Option key to retrieve (e.g. enabled)
+      required: false
+      example: enabled
+      selector:
+        text:
+    target_entity_id:
+      name: Target Entity
+      description: Sensor entity ID to update with the result
+      required: false
+      example: sensor.block_user_enabled
+      selector:
+        entity:
+
+uci_set_commit:
+  name: UCI Set & Commit
+  description: Set a UCI option value and immediately commit the change
+  fields:
+    config:
+      name: Config
+      description: UCI config name (e.g. firewall, wireless, dhcp)
+      required: true
+      example: firewall
+      selector:
+        text:
+    section:
+      name: Section
+      description: Section name or type/index
+      required: true
+      example: block_user
+      selector:
+        text:
+    option:
+      name: Option
+      description: Option key to modify
+      required: true
+      example: enabled
+      selector:
+        text:
+    value:
+      name: Value
+      description: New value (string)
+      required: true
+      example: "0"
+      selector:
+        text:
+    service:
+      name: Service to restart
+      description: Service(s) to restart after the change (optional)
+      required: false
+      example: firewall
+      selector:
+        text:
+
+uci_network_interface:
+  name: UCI Network Interface
+  description: Call a network.interface ubus method (e.g., up/down)
+  fields:
+    section:
+      name: Section
+      description: Network interface section (e.g. network.interface.wwan)
+      required: true
+      example: network.interface.wwan
+      selector:
+        text:
+    option:
+      name: Option
+      description: Action to perform (e.g. up, down)
+      required: true
+      example: up
+      selector:
+        text:

@@ -20,7 +20,8 @@ class EnhancedUbusClient(Ubus):
 
     def __init__(
         self,
-        host,
+        url,
+        hostname,
         username,
         password,
         session=None,
@@ -47,7 +48,7 @@ class EnhancedUbusClient(Ubus):
         else:
             _LOGGER.debug("Using provided session")
 
-        super().__init__(host, username, password, session, timeout, verify)
+        super().__init__(url, hostname, username, password, session, timeout, verify)
 
         # Store SSL settings
         self.cert_file = cert_file
@@ -165,7 +166,8 @@ class EnhancedUbusClient(Ubus):
 
 
 def create_enhanced_ubus_client(
-    host: str,
+    url: str,
+    hostname: str,
     username: str,
     password: str,
     session=None,
@@ -176,7 +178,8 @@ def create_enhanced_ubus_client(
     """Create an enhanced Ubus client with proper SSL handling.
 
     Args:
-        host: OpenWrt device host
+        url: The ubus API URL (e.g. http://192.168.1.1/ubus)
+        hostname: The hostname of the OpenWrt device
         username: Username for authentication
         password: Password for authentication
         session: Existing aiohttp session (optional)
@@ -188,7 +191,8 @@ def create_enhanced_ubus_client(
         Enhanced Ubus client instance
     """
     return EnhancedUbusClient(
-        host=host,
+        url=url,
+        hostname=hostname,
         username=username,
         password=password,
         session=session,
@@ -201,10 +205,18 @@ def create_enhanced_ubus_client(
 class EnhancedExtendedUbusClient:
     """Wrapper for ExtendedUbus with enhanced SSL handling."""
 
-    def __init__(self, host, username, password, session=None, timeout=30, verify=True, cert_file=None):
+    def __init__(self, url, hostname, username, password, session=None, timeout=30, verify=True, cert_file=None):
         """Initialize enhanced extended ubus client."""
+        self._url = url
+        self._hostname = hostname
+        self._username = username
+        self._password = password
+        self._session = session
+        self._timeout = timeout
+        self._verify = verify
+        self._cert_file = cert_file
         self.base_client = create_enhanced_ubus_client(
-            host, username, password, session, timeout, verify, cert_file
+            url, hostname, username, password, session, timeout, verify, cert_file
         )
         self._extended_ubus = None
 
@@ -222,13 +234,13 @@ class EnhancedExtendedUbusClient:
         # Create ExtendedUbus instance using the base client's session
         from .extended_ubus import ExtendedUbus
         self._extended_ubus = ExtendedUbus(
-            self.base_client.host,
-            self.base_client.username,
-            self.base_client.password,
+            self._url,
+            self._hostname,
+            self._username,
+            self._password,
             session=self.base_client.session,
-            timeout=self.base_client.timeout,
-            verify=self.base_client.verify,
-            cert_file=self.base_client.cert_file
+            timeout=self._timeout,
+            verify=self._verify,
         )
         self._extended_ubus.session_id = result
         return result
@@ -245,7 +257,8 @@ class EnhancedExtendedUbusClient:
 
 
 def create_enhanced_extended_ubus_client(
-    host: str,
+    url: str,
+    hostname: str,
     username: str,
     password: str,
     session=None,
@@ -256,7 +269,8 @@ def create_enhanced_extended_ubus_client(
     """Create an enhanced ExtendedUbus client with proper SSL handling.
 
     Args:
-        host: OpenWrt device host
+        url: The ubus API URL (e.g. http://192.168.1.1/ubus)
+        hostname: The hostname of the OpenWrt device
         username: Username for authentication
         password: Password for authentication
         session: Existing aiohttp session (optional)
@@ -268,7 +282,8 @@ def create_enhanced_extended_ubus_client(
         Enhanced ExtendedUbus client wrapper instance
     """
     return EnhancedExtendedUbusClient(
-        host=host,
+        url=url,
+        hostname=hostname,
         username=username,
         password=password,
         session=session,
