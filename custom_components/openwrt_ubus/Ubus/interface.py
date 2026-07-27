@@ -249,10 +249,14 @@ class Ubus:
                             error_msg = _get_error_message(error_code)
                             if len(result) == 2:
                                 if error_code == UBUS_ERROR_SUCCESS:
-                                    # Success - return the data
                                     _append_result(result[1])
+                                elif error_code == UBUS_ERROR_PERMISSION_DENIED:
+                                    _append_result(
+                                        PermissionError(
+                                            f"Permission denied for ubus call: {error_msg}"
+                                        )
+                                    )
                                 else:
-                                    # Error code - log with descriptive message and return None
                                     _append_result(
                                         RPCError(
                                             f"API call failed with error code {error_code} ({error_msg}): {result[1]}"
@@ -260,8 +264,13 @@ class Ubus:
                                     )
                             elif len(result) == 1:
                                 if error_code == UBUS_ERROR_SUCCESS:
-                                    # No data returned but success
                                     _append_result(None)
+                                elif error_code == UBUS_ERROR_PERMISSION_DENIED:
+                                    _append_result(
+                                        PermissionError(
+                                            f"Permission denied for ubus call: {error_msg}"
+                                        )
+                                    )
                                 else:
                                     _append_result(
                                         RPCError(

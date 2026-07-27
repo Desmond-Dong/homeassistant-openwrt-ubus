@@ -60,6 +60,7 @@ class SharedUbusDataManager:
         self._data_cache: Dict[str, Dict[str, Any]] = {}
         self._last_update: Dict[str, datetime] = {}
         self._interface_to_ssid = {}  # Cache for interface->SSID mapping
+        self._wired_filter_warning_logged = False
 
         # Get timeout values from configuration (priority: options > data > default)
         system_timeout = entry.options.get(
@@ -198,19 +199,32 @@ class SharedUbusDataManager:
         try:
             system_info = await client.system_info()
             return {"system_info": system_info}
+        except PermissionError:
+            _LOGGER.warning(
+                "system.info is not available. "
+                "Check OpenWrt ubus ACL for 'system' permissions. "
+                "System sensors will be unavailable."
+            )
+            return {"system_info": {}}
         except Exception as exc:
             _LOGGER.error("Error fetching system info: %s", exc)
             raise UpdateFailed(f"Error fetching system info: {exc}")
 
     async def _fetch_system_stat(self) -> Dict[str, Any]:
-        """Fetch system information."""
+        """Fetch kernel system statistics (/proc/stat)."""
         client = await self._get_ubus_client()
         try:
             system_stat = await client.system_stat()
             return {"system_stat": system_stat}
+        except PermissionError:
+            _LOGGER.warning(
+                "file.read /proc/stat is not available. "
+                "Check OpenWrt ubus ACL for 'file' read permissions on /proc/stat."
+            )
+            return {"system_stat": {}}
         except Exception as exc:
-            _LOGGER.error("Error fetching system info: %s", exc)
-            raise UpdateFailed(f"Error fetching system info: {exc}")
+            _LOGGER.error("Error fetching /proc/stat: %s", exc)
+            return {"system_stat": {}}
 
     async def _fetch_system_board(self) -> Dict[str, Any]:
         """Fetch system board information."""
@@ -690,14 +704,21 @@ class SharedUbusDataManager:
                 self.entry.data.get(CONF_WIRED_TRACKER_INTERFACES, DEFAULT_WIRED_TRACKER_INTERFACES),
             )
 
-            # Warn if no filtering is configured
+            # Warn if no filtering is configured (log once to avoid spam)
             if not whitelist and not interface_filter:
-                _LOGGER.warning(
-                    "Wired device tracker is enabled without any filters (whitelist or interface). "
-                    "This may create many confusing device tracker entities. "
-                    "Consider configuring whitelist (IP/MAC prefixes) or interface filter (e.g., br-lan) "
-                    "in the integration options to limit tracked devices."
-                )
+                if not self._wired_filter_warning_logged:
+                    _LOGGER.warning(
+                        "Wired device tracker is enabled without any filters (whitelist or interface). "
+                        "This may create many confusing device tracker entities. "
+                        "Consider configuring whitelist (IP/MAC prefixes) or interface filter (e.g., br-lan) "
+                        "in the integration options to limit tracked devices."
+                    )
+                    self._wired_filter_warning_logged = True
+                else:
+                    _LOGGER.debug(
+                        "Wired device tracker is enabled without any filters (whitelist or interface). "
+                        "Suppressing further warnings."
+                    )
 
             # Get WiFi device MACs to filter out
             wifi_macs = set()

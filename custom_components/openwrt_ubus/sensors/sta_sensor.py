@@ -699,7 +699,6 @@ class DeviceStatisticsSensor(CoordinatorEntity, SensorEntity):
 
         device_info_dict = {
             "identifiers": {(DOMAIN, self._mac_address)},
-            "name": self._get_device_name(),
             "manufacturer": "Unknown",
             "model": "WiFi Device",
             "connections": {("mac", self._mac_address)},
