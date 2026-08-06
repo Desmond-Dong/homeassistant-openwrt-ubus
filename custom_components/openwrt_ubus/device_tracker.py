@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -114,13 +115,16 @@ async def _migrate_device_tracker_unique_ids(
         old_unique_id = entity_entry.unique_id
 
         # Extract MAC address from old unique_id
-        if old_tracking_method == "combined":
+        if re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", old_unique_id):
+            # Legacy bare MAC address format
+            mac_address = old_unique_id.upper()
+        elif old_tracking_method == "combined":
             # Format: "{host}_{mac_address}"
             # Use rsplit to handle hostnames with underscores correctly
             if "_" in old_unique_id:
                 mac_address = old_unique_id.rsplit("_", 1)[-1].upper()
             else:
-                _LOGGER.warning("Cannot parse MAC from unique_id: %s", old_unique_id)
+                _LOGGER.debug("Cannot parse MAC from unique_id: %s", old_unique_id)
                 continue
         else:  # old was "uniqueid"
             # Format: "{mac_address}"
@@ -390,7 +394,10 @@ async def _restore_known_devices_from_registry(
         if entity_entry.domain == "device_tracker" and entity_entry.platform == DOMAIN:
             # Extract MAC address from unique_id based on tracking method
             if entity_entry.unique_id:
-                if tracking_method == "uniqueid":
+                # Handle legacy entities whose unique_id is a bare MAC address
+                if re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", entity_entry.unique_id):
+                    mac_address = entity_entry.unique_id.upper()
+                elif tracking_method == "uniqueid":
                     # Format: "{mac_address}"
                     mac_address = entity_entry.unique_id.upper()
                 else:  # "combined"
@@ -399,7 +406,7 @@ async def _restore_known_devices_from_registry(
                     if "_" in entity_entry.unique_id:
                         mac_address = entity_entry.unique_id.rsplit("_", 1)[-1].upper()
                     else:
-                        _LOGGER.warning(
+                        _LOGGER.debug(
                             "Cannot parse MAC from unique_id: %s (expected format: {host}_{mac})",
                             entity_entry.unique_id,
                         )
