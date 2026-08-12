@@ -278,9 +278,11 @@ async def async_setup_entry(
 
         new_entities = []
         for sensor_name in sorted(new_sensor_names):
+            normalized_key = sensor_name.replace("-", "_")
+            normalized_name = sensor_name.replace("_", " ").replace("-", " ").title()
             temp_description = SensorEntityDescription(
-                key=f"temperature_{sensor_name}",
-                name=f"Temperature {sensor_name}",
+                key=f"temperature_{normalized_key}",
+                name=f"Temperature {normalized_name}",
                 device_class=SensorDeviceClass.TEMPERATURE,
                 state_class=SensorStateClass.MEASUREMENT,
                 native_unit_of_measurement=UnitOfTemperature.CELSIUS,
@@ -426,10 +428,11 @@ class SystemInfoSensor(CoordinatorEntity, SensorEntity):
         elif key == "conntrack_count":
             return self.coordinator.data.get("conntrack_count")
         elif key.startswith("temperature_"):
-            # Extract sensor name from key (after "temperature_")
-            sensor_name = key[12:]  # Remove "temperature_" prefix
+            sensor_name = key[12:]
             temperatures = self.coordinator.data.get("system_temperatures", {})
-            return temperatures.get(sensor_name)
+            if sensor_name in temperatures:
+                return temperatures[sensor_name]
+            return temperatures.get(sensor_name.replace("_", "-"))
         elif key == "dhcp_clients_count":
             return self.coordinator.data.get("dhcp_clients_count")
         elif key == "root_filesystem_total":
