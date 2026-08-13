@@ -645,37 +645,40 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
 
     def _get_device_name(self) -> str:
         """Get the device name from coordinator data, DHCP lease, or fallback to MAC."""
+        mac_upper = self.mac_address.upper()
+
         # Get device data based on tracking method
         if self._tracking_method == "uniqueid":
             device_data, _ = self._get_device_data_from_any_coordinator()
         else:
             device_data = self._device_data()
 
+        def _valid_name(value: str | None) -> str | None:
+            """Return value if it's a usable hostname, else None."""
+            if not value:
+                return None
+            if value in ("*", mac_upper, self.mac_address):
+                return None
+            if value.replace(".", "").isdigit():
+                return None
+            return value
+
+        # 1. Try hostname from device data
         if device_data:
-            hostname = device_data.get("hostname")
-            if (
-                hostname
-                and hostname != self.mac_address
-                and hostname != self.mac_address.upper()
-                and hostname != "*"
-            ):
+            hostname = _valid_name(device_data.get("hostname"))
+            if hostname:
                 if "." in hostname:
                     return hostname.split(".")[0]
                 return hostname
 
-            ip_address = device_data.get("ip_address", "")
-            if ip_address and ip_address != "Unknown IP":
-                return ip_address.replace(".", "_")
+        # 2. Try DHCP lease hostname (works for both online and offline)
+        dhcp_names = self.coordinator.data_manager.dhcp_name_mapping
+        if mac_upper in dhcp_names:
+            dhcp_hostname = _valid_name(dhcp_names[mac_upper].get("hostname"))
+            if dhcp_hostname:
+                return dhcp_hostname
 
-        # Fallback to DHCP lease hostname when device is offline
-        if not device_data:
-            dhcp_names = self.coordinator.data_manager.dhcp_name_mapping
-            mac = self.mac_address.upper()
-            if mac in dhcp_names:
-                dhcp_hostname = dhcp_names[mac].get("hostname")
-                if dhcp_hostname and dhcp_hostname != "*":
-                    return dhcp_hostname
-
+        # 3. Fallback to MAC
         return self.mac_address.replace(":", "")
 
     @property
