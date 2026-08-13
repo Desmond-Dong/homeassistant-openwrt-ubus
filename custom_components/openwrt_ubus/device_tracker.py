@@ -596,8 +596,10 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
+        device_name = self._get_device_name()
         device_info_dict = {
             "identifiers": {(DOMAIN, self.mac_address)},
+            "name": device_name,
             "model": "Network Device",
             "connections": {("mac", self.mac_address)},
         }
