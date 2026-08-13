@@ -768,13 +768,14 @@ class SharedUbusDataManager:
 
                     # Merge or create device entry
                     if mac not in wired_devices:
+                        is_reachable = neighbor.get("state") in ("REACHABLE", "PERMANENT")
                         wired_devices[mac] = {
                             "mac": mac,
                             "ipv4": None,
                             "ipv6": None,
                             "interface": neighbor.get("interface"),
                             "state": neighbor.get("state"),
-                            "connected": True,
+                            "connected": is_reachable,
                         }
 
                     # Update IP addresses
@@ -786,6 +787,7 @@ class SharedUbusDataManager:
                     # Update state if more recent
                     if neighbor.get("state") in ["REACHABLE", "PERMANENT"]:
                         wired_devices[mac]["state"] = neighbor.get("state")
+                        wired_devices[mac]["connected"] = True
 
             # Set ip_address from the best available IP
             for _, device in wired_devices.items():
