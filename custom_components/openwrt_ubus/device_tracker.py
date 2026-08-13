@@ -649,8 +649,15 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
         if self._tracking_method == "uniqueid":
             device_data, _ = self._get_device_data_from_any_coordinator()
         else:
-            device_stats = self.coordinator.data.get("device_statistics", {})
-            device_data = device_stats.get(self.mac_address) or device_stats.get(self.mac_address.upper())
+            device_data = self._device_data()
+
+        # Fallback to DHCP lease data when device is offline
+        dhcp_hostname = None
+        if not device_data:
+            dhcp_names = self.coordinator.data_manager.dhcp_name_mapping
+            mac = self.mac_address.upper()
+            if mac in dhcp_names:
+                dhcp_hostname = dhcp_names[mac].get("hostname")
 
         # If tracking method is "uniqueid", use simple naming without AP/SSID info
         if self._tracking_method == "uniqueid":
@@ -679,6 +686,8 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
                         return self.mac_address.replace(":", "")
 
             # Fallback to MAC address if no device data found
+            if dhcp_hostname:
+                return dhcp_hostname
             return self.mac_address.replace(":", "")
 
         # For "combined" tracking method, use the detailed naming with AP/SSID
@@ -708,6 +717,8 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
                     return f"{base_name} {self.mac_address.replace(':', '')}"
 
         # Fallback to MAC address if no device data found
+        if dhcp_hostname:
+            return dhcp_hostname
         return self.mac_address.replace(':', '')
 
     @property
