@@ -644,82 +644,39 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
         return self._host
 
     def _get_device_name(self) -> str:
-        """Get the device name from coordinator data or fallback to MAC."""
+        """Get the device name from coordinator data, DHCP lease, or fallback to MAC."""
         # Get device data based on tracking method
         if self._tracking_method == "uniqueid":
             device_data, _ = self._get_device_data_from_any_coordinator()
         else:
             device_data = self._device_data()
 
-        # Fallback to DHCP lease data when device is offline
-        dhcp_hostname = None
+        if device_data:
+            hostname = device_data.get("hostname")
+            if (
+                hostname
+                and hostname != self.mac_address
+                and hostname != self.mac_address.upper()
+                and hostname != "*"
+            ):
+                if "." in hostname:
+                    return hostname.split(".")[0]
+                return hostname
+
+            ip_address = device_data.get("ip_address", "")
+            if ip_address and ip_address != "Unknown IP":
+                return ip_address.replace(".", "_")
+
+        # Fallback to DHCP lease hostname when device is offline
         if not device_data:
             dhcp_names = self.coordinator.data_manager.dhcp_name_mapping
             mac = self.mac_address.upper()
             if mac in dhcp_names:
                 dhcp_hostname = dhcp_names[mac].get("hostname")
+                if dhcp_hostname and dhcp_hostname != "*":
+                    return dhcp_hostname
 
-        # If tracking method is "uniqueid", use simple naming without AP/SSID info
-        if self._tracking_method == "uniqueid":
-            if device_data:
-                hostname = device_data.get("hostname")
-
-                # Show hostname if available and meaningful
-                if (
-                    hostname
-                    and hostname != self.mac_address
-                    and hostname != self.mac_address.upper()
-                    and hostname != "*"
-                ):
-                    # If hostname looks like a domain name, use only the first part
-                    if "." in hostname:
-                        return hostname.split(".")[0]
-                    else:
-                        return hostname
-                else:
-                    # Try to show IP address if hostname not available
-                    ip_address = device_data.get("ip_address", "")
-                    if ip_address and ip_address != "Unknown IP":
-                        return ip_address.replace(".", "_")
-                    else:
-                        # Fallback to MAC address without colons
-                        return self.mac_address.replace(":", "")
-
-            # Fallback to MAC address if no device data found
-            if dhcp_hostname:
-                return dhcp_hostname
-            return self.mac_address.replace(":", "")
-
-        # For "combined" tracking method, use the detailed naming with AP/SSID
-        connected_router = self._host or "Unknown Router"
-
-        if device_data:
-            # Use SSID instead of physical interface name
-            ssid = device_data.get("ap_ssid", "Unknown SSID")
-            base_name = f"{connected_router}({ssid})" if ssid != "Unknown SSID" else connected_router
-
-            hostname = device_data.get("hostname")
-
-            # Show hostname if available and meaningful
-            if hostname and hostname != self.mac_address and hostname != self.mac_address.upper() and hostname != "*":
-                # If hostname looks like a domain name, use it directly
-                if "." in hostname:
-                    return f"{base_name} {hostname.split('.')[0]}"
-                else:
-                    return f"{base_name} {hostname}"
-            else:
-                # Try to show IP address if hostname not available
-                ip_address = device_data.get("ip_address", "")
-                if ip_address and ip_address != "Unknown IP":
-                    return f"{base_name} {ip_address}"
-                else:
-                    # Fallback to MAC address
-                    return f"{base_name} {self.mac_address.replace(':', '')}"
-
-        # Fallback to MAC address if no device data found
-        if dhcp_hostname:
-            return dhcp_hostname
-        return self.mac_address.replace(':', '')
+        return self.mac_address.replace(":", "")
 
     @property
     def name(self) -> str:
