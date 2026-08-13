@@ -653,43 +653,6 @@ class DeviceStatisticsSensor(CoordinatorEntity, SensorEntity):
 
         return None
 
-    def _get_device_data_with_host(self) -> tuple[dict | None, str | None]:
-        """Get device data and the host where it was found.
-
-        Returns:
-            Tuple of (device_data, host) where device was found, or (None, None) if not found.
-        """
-        device_stats = self.coordinator.data.get("device_statistics", {})
-        device_data = device_stats.get(self._mac_address) or device_stats.get(self._mac_address.upper())
-
-        # For combined tracking or if found locally, return immediately
-        if self._tracking_method == "combined" or device_data:
-            return device_data, self._host
-
-        # For uniqueid tracking, search in all coordinators if not found locally
-        if self._tracking_method == "uniqueid":
-            sta_coordinators_key = "sta_sensor_coordinators"
-            all_coordinators = self.hass.data.get(DOMAIN, {}).get(sta_coordinators_key, {})
-
-            for entry_id, other_coordinator in all_coordinators.items():
-                # Skip the coordinator we already checked
-                if other_coordinator == self.coordinator:
-                    continue
-
-                # Check if coordinator has data
-                if not other_coordinator.data:
-                    continue
-
-                # Look for device in this coordinator's data
-                other_stats = other_coordinator.data.get("device_statistics", {})
-                device_data = other_stats.get(self._mac_address) or other_stats.get(self._mac_address.upper())
-
-                if device_data:
-                    other_host = other_coordinator.data_manager.entry.data[CONF_HOST]
-                    return device_data, other_host
-
-        return None, None
-
     @property
     def device_info(self) -> DeviceInfo | None:
         """Return device info to link this sensor to a device."""
@@ -777,17 +740,13 @@ class DeviceStatisticsSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
-        # Get device data with current host (for uniqueid tracking, this searches all coordinators)
-        device_data, current_host = self._get_device_data_with_host()
+        device_data = self._device_data()
         if device_data is None:
             return {}
 
-        # Use the host where device was actually found (dynamic for uniqueid tracking)
-        router_host = current_host if current_host else self._host
-
         attributes = {
             "mac_address": self._mac_address,
-            "router": router_host,
+            "router": self._host,
             "last_update": self.coordinator.last_update_success,
             "ap_device": device_data.get("ap_device", "Unknown AP"),
             "ap_ssid": device_data.get("ap_ssid", "Unknown SSID"),
