@@ -763,8 +763,13 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
             )
             return self._check_consider_home(False)
 
-        # For combined tracking, use simplified logic from main
-        if device_data := self._device_data():
+        # For combined tracking, only check device_statistics (WiFi),
+        # not wired_devices (ARP table), to avoid stale ARP entries
+        # keeping WiFi devices marked as "home" after disconnection.
+        device_stats = self.coordinator.data.get("device_statistics", {})
+        device_data = device_stats.get(self._attr_mac_address) or device_stats.get(self._attr_mac_address.upper())
+
+        if device_data:
             connected = device_data.get("connected", False)
             _LOGGER.debug("Device %s connection status: %s", self._attr_mac_address, connected)
             return self._check_consider_home(connected)
@@ -854,6 +859,11 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
         """Return the hostname of the device."""
         if device_data := self._device_data():
             return device_data.get("hostname")
+        # Fallback to DHCP lease data when device is offline
+        dhcp_names = self.coordinator.data_manager.dhcp_name_mapping
+        mac = self.mac_address.upper()
+        if mac in dhcp_names:
+            return dhcp_names[mac].get("hostname")
         return None
 
     @property
@@ -861,4 +871,8 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
         """Return the IP address of the device."""
         if device_data := self._device_data():
             return device_data.get("ip_address")
+        dhcp_names = self.coordinator.data_manager.dhcp_name_mapping
+        mac = self.mac_address.upper()
+        if mac in dhcp_names:
+            return dhcp_names[mac].get("ip")
         return None

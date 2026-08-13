@@ -60,6 +60,7 @@ class SharedUbusDataManager:
         self._data_cache: Dict[str, Dict[str, Any]] = {}
         self._last_update: Dict[str, datetime] = {}
         self._interface_to_ssid = {}  # Cache for interface->SSID mapping
+        self._dhcp_name_mapping: Dict[str, Dict[str, str]] = {}  # DHCP lease hostname cache
         self._wired_filter_warning_logged = False
 
         # Get timeout values from configuration (priority: options > data > default)
@@ -113,6 +114,11 @@ class SharedUbusDataManager:
         # Initialize ubus clients
         self._ubus_clients: Dict[str, ExtendedUbus] = {}
         self._session = None
+
+    @property
+    def dhcp_name_mapping(self) -> Dict[str, Dict[str, str]]:
+        """DHCP lease hostname mapping (MAC → {hostname, ip})."""
+        return self._dhcp_name_mapping
 
     async def _get_ubus_client(self, client_type: str = "default") -> ExtendedUbus:
         """Get or create ubus client instance."""
@@ -319,6 +325,7 @@ class SharedUbusDataManager:
         try:
             # Get MAC to name/IP mapping (includes /etc/ethers)
             mac2name = await self._get_mac2name_mapping(dhcp_software)
+            self._dhcp_name_mapping = mac2name
 
             # Get interface to SSID mapping
             interface_to_ssid = await self._get_interface_to_ssid_mapping()
