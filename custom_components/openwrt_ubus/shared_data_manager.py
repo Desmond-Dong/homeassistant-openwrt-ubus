@@ -574,29 +574,6 @@ class SharedUbusDataManager:
                                         "ip": hosts[2],
                                     }
 
-                # Try to get IPv6 leases via odhcpd (common on dnsmasq+odhcpd setups)
-                try:
-                    v6_result = await client.get_dhcp_method("ipv6leases")
-                    if v6_result and "device" in v6_result:
-                        for device in v6_result["device"].values():
-                            for lease in device.get("leases", []):
-                                mac = lease.get("mac", "")
-                                if mac and len(mac) == 12:
-                                    mac = ":".join(mac[i:i + 2] for i in range(0, len(mac), 2))
-                                    mac_upper = mac.upper()
-                                    if mac_upper not in mac2name:
-                                        mac2name[mac_upper] = {
-                                            "hostname": lease.get("hostname", ""),
-                                            "ip": "",
-                                        }
-                                    # Always add IPv6 address to existing entries
-                                    ipv6 = lease.get("ip", "")
-                                    if ipv6:
-                                        mac2name.setdefault(mac_upper, {"hostname": "", "ip": ""})
-                                        mac2name[mac_upper]["ipv6"] = ipv6
-                except Exception:
-                    pass
-
             elif dhcp_software == "odhcpd":
                 # Get odhcpd IPv4 leases
                 result = await client.get_dhcp_method("ipv4leases")
@@ -613,27 +590,8 @@ class SharedUbusDataManager:
                                         "ip": lease.get("ip", ""),
                                     }
 
-                # Get odhcpd IPv6 leases
-                try:
-                    v6_result = await client.get_dhcp_method("ipv6leases")
-                    if v6_result and "device" in v6_result:
-                        for device in v6_result["device"].values():
-                            for lease in device.get("leases", []):
-                                mac = lease.get("mac", "")
-                                if mac and len(mac) == 12:
-                                    mac = ":".join(mac[i:i + 2] for i in range(0, len(mac), 2))
-                                    mac_upper = mac.upper()
-                                    if mac_upper not in mac2name:
-                                        mac2name[mac_upper] = {
-                                            "hostname": lease.get("hostname", ""),
-                                            "ip": "",
-                                        }
-                                    ipv6 = lease.get("ip", "")
-                                    if ipv6:
-                                        mac2name.setdefault(mac_upper, {"hostname": "", "ip": ""})
-                                        mac2name[mac_upper]["ipv6"] = ipv6
-                except Exception:
-                    pass
+            # Get IPv6 leases from odhcpd (works for both dnsmasq and odhcpd modes)
+            await self._fetch_ipv6_leases(client, mac2name)
 
         except Exception as exc:
             err_str = str(exc)
@@ -646,6 +604,56 @@ class SharedUbusDataManager:
                 _LOGGER.debug("Failed to get DHCP MAC to name mapping: %s", exc)
 
         return mac2name
+
+    @staticmethod
+    def _extract_mac_from_duid(duid: str) -> str | None:
+        """Extract MAC address from DUID if possible.
+
+        DUID types:
+        - Type 1 (LLT): 0001 + hwtype(2B) + time(4B) + MAC(6B)
+        - Type 3 (LL):  0003 + hwtype(2B) + MAC(6B)
+        - Type 4 (UUID): no MAC
+        """
+        if not duid or len(duid) < 8:
+            return None
+        duid_type = duid[:4]
+        if duid_type == "0001" and len(duid) >= 28:
+            # LLT: skip 2B type + 2B hwtype + 4B time = 8 bytes = 16 hex chars
+            mac_hex = duid[16:28]
+        elif duid_type == "0003" and len(duid) >= 20:
+            # LL: skip 2B type + 2B hwtype = 4 bytes = 8 hex chars
+            mac_hex = duid[8:20]
+        else:
+            return None
+        return ":".join(mac_hex[i:i + 2] for i in range(0, 12, 2)).upper()
+
+    async def _fetch_ipv6_leases(self, client: ExtendedUbus, mac2name: dict) -> None:
+        """Fetch IPv6 leases from odhcpd and merge into mac2name."""
+        try:
+            v6_result = await client.get_dhcp_method("ipv6leases")
+            if not v6_result or "device" not in v6_result:
+                return
+            count = 0
+            for device in v6_result["device"].values():
+                for lease in device.get("leases", []):
+                    duid = lease.get("duid", "")
+                    mac = self._extract_mac_from_duid(duid)
+                    if not mac:
+                        continue
+                    hostname = lease.get("hostname", "")
+                    # Extract first IPv6 address
+                    ipv6_addrs = lease.get("ipv6-addr", [])
+                    ipv6 = ipv6_addrs[0]["address"] if ipv6_addrs else ""
+
+                    if mac not in mac2name:
+                        mac2name[mac] = {"hostname": hostname, "ip": ""}
+                    if ipv6:
+                        mac2name[mac]["ipv6"] = ipv6
+                    count += 1
+            if count:
+                _LOGGER.debug("Loaded %d IPv6 leases (with MAC from DUID)", count)
+        except Exception as exc:
+            _LOGGER.debug("Could not read IPv6 leases: %s", exc)
 
     async def _fetch_conntrack_count(self) -> Dict[str, Any]:
         """Fetch connection tracking count."""
