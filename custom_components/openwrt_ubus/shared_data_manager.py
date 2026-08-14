@@ -529,7 +529,25 @@ class SharedUbusDataManager:
         except Exception as exc:
             _LOGGER.debug("Could not read /etc/ethers: %s", exc)
 
-        # Then get DHCP mappings (will not override ethers entries)
+        # Get static DHCP host bindings from UCI config (always available, even when offline)
+        try:
+            host_result = await client.get_uci_config("dhcp", "host")
+            if host_result and "values" in host_result:
+                for section in host_result["values"].values():
+                    if not isinstance(section, dict):
+                        continue
+                    mac = section.get("mac", "")
+                    name = section.get("name", "")
+                    ip = section.get("ip", "")
+                    if mac and name:
+                        mac_upper = mac.upper()
+                        if mac_upper not in mac2name:
+                            mac2name[mac_upper] = {"hostname": name, "ip": ip}
+                _LOGGER.debug("Loaded static DHCP host bindings: %d entries", len(host_result["values"]))
+        except Exception as exc:
+            _LOGGER.debug("Could not read UCI dhcp host bindings: %s", exc)
+
+        # Then get DHCP mappings (will not override ethers/static entries)
         try:
             if dhcp_software == "dnsmasq":
                 # Get dnsmasq lease file location
