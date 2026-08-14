@@ -776,10 +776,15 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
                     "name": self._get_device_name(),
                     "hostname": device_data.get("hostname", self.mac_address),
                     "connection_type": connection_type,
-                    "router": current_router,  # Show router where device is currently connected
-                    "ip_address": device_data.get("ip_address", "Unknown IP"),
+                    "router": current_router,
+                    "ip_address": device_data.get("ip_address") or device_data.get("ipv4") or "Unknown IP",
                 }
             )
+
+            # Add IPv6 address if available
+            ipv6 = device_data.get("ipv6")
+            if ipv6:
+                attributes["ipv6_address"] = ipv6
 
             # Add wireless-specific attributes
             if connection_type == "wireless":
@@ -834,11 +839,26 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
 
     @property
     def ip_address(self) -> str | None:
-        """Return the IP address of the device."""
+        """Return the IPv4 address of the device."""
         if device_data := self._device_data():
-            return device_data.get("ip_address")
+            ip = device_data.get("ip_address") or device_data.get("ipv4")
+            if ip:
+                return ip
         dhcp_names = self.coordinator.data_manager.dhcp_name_mapping
         mac = self.mac_address.upper()
         if mac in dhcp_names:
             return dhcp_names[mac].get("ip")
+        return None
+
+    @property
+    def ipv6_address(self) -> str | None:
+        """Return the IPv6 address of the device."""
+        if device_data := self._device_data():
+            ipv6 = device_data.get("ipv6")
+            if ipv6:
+                return ipv6
+        dhcp_names = self.coordinator.data_manager.dhcp_name_mapping
+        mac = self.mac_address.upper()
+        if mac in dhcp_names:
+            return dhcp_names[mac].get("ipv6")
         return None

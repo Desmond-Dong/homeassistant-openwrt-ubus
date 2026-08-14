@@ -542,7 +542,12 @@ class SharedUbusDataManager:
                     if mac and name:
                         mac_upper = mac.upper()
                         if mac_upper not in mac2name:
-                            mac2name[mac_upper] = {"hostname": name, "ip": ip}
+                            entry = {"hostname": name, "ip": ip}
+                            # Detect IPv6 in ip field
+                            if ip and ":" in ip:
+                                entry["ip"] = ""
+                                entry["ipv6"] = ip
+                            mac2name[mac_upper] = entry
                 _LOGGER.debug("Loaded static DHCP host bindings: %d entries", len(host_result["values"]))
         except Exception as exc:
             _LOGGER.debug("Could not read UCI dhcp host bindings: %s", exc)
@@ -556,21 +561,44 @@ class SharedUbusDataManager:
                     values = result["values"].values()
                     leasefile = next(iter(values), {}).get("leasefile", "/tmp/dhcp.leases")
 
-                    # Read lease file
+                    # Read lease file (IPv4)
                     lease_result = await client.file_read(leasefile)
                     if lease_result and "data" in lease_result:
                         for line in lease_result["data"].splitlines():
                             hosts = line.split(" ")
                             if len(hosts) >= 4:
                                 mac_upper = hosts[1].upper()
-                                # Only add if not already in mac2name (ethers has priority)
                                 if mac_upper not in mac2name:
                                     mac2name[mac_upper] = {
                                         "hostname": hosts[3],
                                         "ip": hosts[2],
                                     }
+
+                # Try to get IPv6 leases via odhcpd (common on dnsmasq+odhcpd setups)
+                try:
+                    v6_result = await client.get_dhcp_method("ipv6leases")
+                    if v6_result and "device" in v6_result:
+                        for device in v6_result["device"].values():
+                            for lease in device.get("leases", []):
+                                mac = lease.get("mac", "")
+                                if mac and len(mac) == 12:
+                                    mac = ":".join(mac[i:i + 2] for i in range(0, len(mac), 2))
+                                    mac_upper = mac.upper()
+                                    if mac_upper not in mac2name:
+                                        mac2name[mac_upper] = {
+                                            "hostname": lease.get("hostname", ""),
+                                            "ip": "",
+                                        }
+                                    # Always add IPv6 address to existing entries
+                                    ipv6 = lease.get("ip", "")
+                                    if ipv6:
+                                        mac2name.setdefault(mac_upper, {"hostname": "", "ip": ""})
+                                        mac2name[mac_upper]["ipv6"] = ipv6
+                except Exception:
+                    pass
+
             elif dhcp_software == "odhcpd":
-                # Get odhcpd leases
+                # Get odhcpd IPv4 leases
                 result = await client.get_dhcp_method("ipv4leases")
                 if result and "device" in result:
                     for device in result["device"].values():
@@ -579,12 +607,34 @@ class SharedUbusDataManager:
                             if mac and len(mac) == 12:
                                 mac = ":".join(mac[i:i + 2] for i in range(0, len(mac), 2))
                                 mac_upper = mac.upper()
-                                # Only add if not already in mac2name
                                 if mac_upper not in mac2name:
                                     mac2name[mac_upper] = {
                                         "hostname": lease.get("hostname", ""),
                                         "ip": lease.get("ip", ""),
                                     }
+
+                # Get odhcpd IPv6 leases
+                try:
+                    v6_result = await client.get_dhcp_method("ipv6leases")
+                    if v6_result and "device" in v6_result:
+                        for device in v6_result["device"].values():
+                            for lease in device.get("leases", []):
+                                mac = lease.get("mac", "")
+                                if mac and len(mac) == 12:
+                                    mac = ":".join(mac[i:i + 2] for i in range(0, len(mac), 2))
+                                    mac_upper = mac.upper()
+                                    if mac_upper not in mac2name:
+                                        mac2name[mac_upper] = {
+                                            "hostname": lease.get("hostname", ""),
+                                            "ip": "",
+                                        }
+                                    ipv6 = lease.get("ip", "")
+                                    if ipv6:
+                                        mac2name.setdefault(mac_upper, {"hostname": "", "ip": ""})
+                                        mac2name[mac_upper]["ipv6"] = ipv6
+                except Exception:
+                    pass
+
         except Exception as exc:
             err_str = str(exc)
             if "Not Found" in err_str or "Method not found" in err_str:
