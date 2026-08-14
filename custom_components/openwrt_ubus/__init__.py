@@ -16,7 +16,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers import config_validation as cv, device_registry as dr
+from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
 
@@ -538,6 +538,16 @@ async def _cleanup_disabled_sensor_devices(hass: HomeAssistant, entry: ConfigEnt
             _LOGGER.info("Removing %s device %s", name, device_id)
             device_registry.async_remove_device(main_device.id)
             _LOGGER.debug("Removed %d %s sub-devices", removed_count, name)
+
+    # Remove orphaned devices (devices with no entities)
+    entity_reg = er.async_get(hass)
+    for device in list(device_registry.devices.values()):
+        if not any(identifier[0] == DOMAIN for identifier in device.identifiers):
+            continue
+        entities = er.async_entries_for_device(entity_reg, device.id)
+        if not entities:
+            _LOGGER.info("Removing orphaned device %s (no entities)", device.identifiers)
+            device_registry.async_remove_device(device.id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
