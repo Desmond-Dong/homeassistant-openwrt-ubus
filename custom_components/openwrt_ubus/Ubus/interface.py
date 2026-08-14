@@ -228,14 +228,24 @@ class Ubus:
                         )
                     else:
                         # General error handling
-                        _LOGGER.error(
-                            "API call failed for %s.%s: %s (code: %d) [session_id: %s]",
-                            subsystem,
-                            method,
-                            error_message,
-                            error_code,
-                            self.session_id,
-                        )
+                        if "not found" in error_message.lower() or error_code == -32000:
+                            _LOGGER.debug(
+                                "API call failed for %s.%s: %s (code: %d) [session_id: %s]",
+                                subsystem,
+                                method,
+                                error_message,
+                                error_code,
+                                self.session_id,
+                            )
+                        else:
+                            _LOGGER.error(
+                                "API call failed for %s.%s: %s (code: %d) [session_id: %s]",
+                                subsystem,
+                                method,
+                                error_message,
+                                error_code,
+                                self.session_id,
+                            )
                         _append_result(
                             ConnectionError(
                                 f"API call failed for {subsystem}.{method}: {error_message} (code: {error_code})"

@@ -200,11 +200,12 @@ class ExtendedUbus(Ubus):
             _LOGGER.debug("No hwmon temperatures found, trying thermal_zone fallback")
             temperatures = await self._get_thermal_zone_temperatures()
         if not temperatures:
-            _LOGGER.warning(
-                "No temperature sensors found on this device. "
-                "Checked /sys/class/hwmon/ and /sys/class/thermal/. "
-                "Enable debug logging for details."
-            )
+            if not getattr(self, "_temp_warning_logged", False):
+                _LOGGER.debug(
+                    "No temperature sensors found on this device. "
+                    "Checked /sys/class/hwmon/ and /sys/class/thermal/."
+                )
+                self._temp_warning_logged = True
         return temperatures
 
     async def _get_hwmon_temperatures(self) -> dict:
