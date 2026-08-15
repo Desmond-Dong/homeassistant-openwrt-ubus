@@ -522,6 +522,10 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
         self._attr_name = None  # Will be set dynamically
         self._attr_entity_registry_enabled_default = True  # Enable by default
         self._last_seen: datetime | None = None
+        # None = unknown; True once seen in device_statistics (WiFi).
+        # Wireless devices must never fall back to wired (ARP) data, otherwise
+        # stale ARP entries keep them "home" and hide wireless attributes.
+        self._is_wireless: bool | None = restored_connection_type == "wireless" if restored_connection_type else None
         consider_home_seconds = coordinator.data_manager.entry.data.get(
             CONF_CONSIDER_HOME, DEFAULT_CONSIDER_HOME
         )
@@ -539,14 +543,17 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
         device_data = device_stats.get(self.mac_address) or device_stats.get(self.mac_address.upper())
 
         if device_data and device_data.get("connected"):
+            self._is_wireless = True
             return device_data, self._host
 
-        # Check wired devices
-        wired_devices = self.coordinator.data.get("wired_devices", {})
-        wired_data = wired_devices.get(self.mac_address) or wired_devices.get(self.mac_address.upper())
+        # Wireless devices must not fall back to wired (ARP) data
+        if not self._is_wireless:
+            # Check wired devices
+            wired_devices = self.coordinator.data.get("wired_devices", {})
+            wired_data = wired_devices.get(self.mac_address) or wired_devices.get(self.mac_address.upper())
 
-        if wired_data and wired_data.get("connected"):
-            return wired_data, self._host
+            if wired_data and wired_data.get("connected"):
+                return wired_data, self._host
 
         # If not found locally and tracking method is uniqueid, search in all coordinators
         if self._tracking_method == "uniqueid":
@@ -575,6 +582,10 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
                         self._host,
                     )
                     return device_data, other_host
+
+                # Wireless devices must not fall back to wired (ARP) data
+                if self._is_wireless:
+                    continue
 
                 # Look for device in this coordinator's wired data
                 other_wired = other_coordinator.data.get("wired_devices", {})
@@ -818,7 +829,13 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
         device_stats = self.coordinator.data.get("device_statistics", {})
         device_data = device_stats.get(self._attr_mac_address) or device_stats.get(self._attr_mac_address.upper())
         if device_data:
+            self._is_wireless = True
             return device_data
+
+        # Wireless devices must not fall back to wired (ARP) data:
+        # stale ARP entries would keep them "home" and hide wireless attributes.
+        if self._is_wireless:
+            return None
 
         # Try wired devices
         wired_devices = self.coordinator.data.get("wired_devices", {})

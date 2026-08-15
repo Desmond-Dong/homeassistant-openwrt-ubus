@@ -61,6 +61,7 @@ class SharedUbusDataManager:
         self._last_update: Dict[str, datetime] = {}
         self._interface_to_ssid = {}  # Cache for interface->SSID mapping
         self._dhcp_name_mapping: Dict[str, Dict[str, str]] = {}  # DHCP lease hostname cache
+        self._known_wifi_macs: set[str] = set()  # Cumulative MACs seen on WiFi
         self._wired_filter_warning_logged = False
 
         # Get timeout values from configuration (priority: options > data > default)
@@ -332,11 +333,17 @@ class SharedUbusDataManager:
 
             # Get device statistics and connection info
             if wireless_software == "hostapd":
-                return await self._fetch_hostapd_data(mac2name, interface_to_ssid)
+                result = await self._fetch_hostapd_data(mac2name, interface_to_ssid)
             elif wireless_software == "iwinfo":
-                return await self._fetch_iwinfo_data(mac2name, interface_to_ssid)
+                result = await self._fetch_iwinfo_data(mac2name, interface_to_ssid)
             else:
-                return {}
+                result = {}
+
+            # Cumulative set of MACs seen on WiFi. Used to filter stale ARP
+            # entries out of wired_devices after a WiFi device disconnects.
+            stats = result.get("device_statistics", {})
+            self._known_wifi_macs.update(m.upper() for m in stats)
+            return result
         except Exception as exc:
             _LOGGER.error("Error fetching device statistics: %s", exc)
             raise UpdateFailed(f"Error fetching device statistics: {exc}")
@@ -536,7 +543,11 @@ class SharedUbusDataManager:
                 for section in host_result["values"].values():
                     if not isinstance(section, dict):
                         continue
+                    # Host sections may be bound by mac OR duid (DHCPv6 static leases)
                     mac = section.get("mac", "")
+                    if not mac:
+                        duid = section.get("duid", "")
+                        mac = self._extract_mac_from_duid(duid) or ""
                     name = section.get("name", "")
                     ip = section.get("ip", "")
                     if mac and name:
@@ -804,12 +815,12 @@ class SharedUbusDataManager:
                     )
 
             # Get WiFi device MACs to filter out
-            wifi_macs = set()
+            wifi_macs = set(self._known_wifi_macs)  # Cumulative: includes currently-offline WiFi devices
             try:
                 # Try to get device_statistics to filter WiFi devices
                 device_stats_data = await self.get_data("device_statistics")
                 if device_stats_data and "device_statistics" in device_stats_data:
-                    wifi_macs = set(device_stats_data["device_statistics"].keys())
+                    wifi_macs.update(m.upper() for m in device_stats_data["device_statistics"])
                     _LOGGER.debug("Found %d WiFi devices to filter out", len(wifi_macs))
             except Exception as exc:
                 _LOGGER.debug("Could not get WiFi device list for filtering: %s", exc)
