@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import re
 from datetime import datetime, timedelta
@@ -670,9 +671,12 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
                 return None
             if value in ("*", mac_upper, self.mac_address):
                 return None
-            if value.replace(".", "").isdigit():
+            # Reject actual IP addresses (IPv4/IPv6), keep numeric hostnames like "12560"
+            try:
+                ipaddress.ip_address(value)
                 return None
-            return value
+            except ValueError:
+                return value
 
         # 1. Try hostname from device data
         if device_data:

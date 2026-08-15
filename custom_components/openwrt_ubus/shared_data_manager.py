@@ -543,22 +543,31 @@ class SharedUbusDataManager:
                 for section in host_result["values"].values():
                     if not isinstance(section, dict):
                         continue
-                    # Host sections may be bound by mac OR duid (DHCPv6 static leases)
-                    mac = section.get("mac", "")
-                    if not mac:
+                    # Host sections may be bound by mac OR duid (DHCPv6 static leases).
+                    # mac may be a single string or a list (multi-MAC devices, e.g. iPhone).
+                    macs: list[str] = []
+                    raw_mac = section.get("mac", "")
+                    if isinstance(raw_mac, list):
+                        macs = [m for m in raw_mac if isinstance(m, str) and m]
+                    elif isinstance(raw_mac, str) and raw_mac:
+                        macs = [raw_mac]
+                    if not macs:
                         duid = section.get("duid", "")
-                        mac = self._extract_mac_from_duid(duid) or ""
+                        extracted = self._extract_mac_from_duid(duid)
+                        if extracted:
+                            macs = [extracted]
                     name = section.get("name", "")
                     ip = section.get("ip", "")
-                    if mac and name:
-                        mac_upper = mac.upper()
-                        if mac_upper not in mac2name:
-                            entry = {"hostname": name, "ip": ip}
-                            # Detect IPv6 in ip field
-                            if ip and ":" in ip:
-                                entry["ip"] = ""
-                                entry["ipv6"] = ip
-                            mac2name[mac_upper] = entry
+                    if macs and name:
+                        for mac in macs:
+                            mac_upper = mac.upper()
+                            if mac_upper not in mac2name:
+                                entry = {"hostname": name, "ip": ip}
+                                # Detect IPv6 in ip field
+                                if ip and ":" in ip:
+                                    entry["ip"] = ""
+                                    entry["ipv6"] = ip
+                                mac2name[mac_upper] = entry
                 _LOGGER.debug("Loaded static DHCP host bindings: %d entries", len(host_result["values"]))
         except Exception as exc:
             _LOGGER.debug("Could not read UCI dhcp host bindings: %s", exc)
