@@ -738,8 +738,14 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
                     default=current_data.get(CONF_ENABLE_REBOOT_BUTTON, DEFAULT_ENABLE_REBOOT_BUTTON)
                 ): bool,
                 vol.Optional(
-                    CONF_ENABLE_TOPOLOGY_PANEL,
+    CONF_ENABLE_TOPOLOGY_PANEL,
+    CONF_PRESENCE_PUSH_ENABLED,
+    DEFAULT_PRESENCE_PUSH_ENABLED,
                     default=current_data.get(CONF_ENABLE_TOPOLOGY_PANEL, DEFAULT_ENABLE_TOPOLOGY_PANEL),
+                ): bool,
+                vol.Optional(
+                    CONF_PRESENCE_PUSH_ENABLED,
+                    default=current_data.get(CONF_PRESENCE_PUSH_ENABLED, DEFAULT_PRESENCE_PUSH_ENABLED),
                 ): bool,
                 vol.Optional(
                     CONF_SYSTEM_SENSOR_TIMEOUT,

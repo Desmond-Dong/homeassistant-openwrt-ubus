@@ -237,8 +237,16 @@ cat > /usr/share/rpcd/acl.d/root.json << 'EOF'
 | 🚫 **Device Tracking Method** | Choose between tracking methods | combined | combined/uniqueid |
 | ⏱️ **System Timeout** | System data fetch timeout | 30s | 5s-300s |
 | 📊 **QModem Timeout** | QModem data fetch timeout | 30s | 5s-300s |
-| ⚙️ **Service Timeout** | Service control timeout | 30s | 5s-300s |
-| 🚫 **Device Kick Buttons** | Enable device kick functionality | Disabled | Enabled/Disabled |
+| ⚡ **Presence Push** | Event-driven device tracker updates | Disabled | Enabled/Disabled |
+
+#### ⚡ Event-Driven Presence Push
+
+Optional acceleration for device trackers (default off). When enabled, the integration deploys a tiny watcher script onto the router through the **existing ubus session** (no extra credentials, no separate agent service). The watcher detects hostapd client changes every ~2 seconds and pushes them to Home Assistant via an auto-generated webhook, so device trackers update almost instantly instead of waiting for the next polling cycle.
+
+- Reuses the already-configured router connection and ACL (`file write` + `file exec` permissions required)
+- The script lives in `/tmp` on the router: a router reboot cleanly removes it, and the integration redeploys it on startup
+- If the push stream goes silent (router down, ACL missing), trackers automatically fall back to normal polling
+- Disable the option (or remove the integration) to stop and clean up the watcher
 
 ---
 

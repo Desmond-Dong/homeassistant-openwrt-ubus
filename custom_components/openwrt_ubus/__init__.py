@@ -55,6 +55,9 @@ from .const import (
     PLATFORMS,
     WIRELESS_SOFTWARES,
     build_ubus_url,
+    get_config_value,
+    CONF_PRESENCE_PUSH_ENABLED,
+    DEFAULT_PRESENCE_PUSH_ENABLED,
 )
 from .extended_ubus import ExtendedUbus
 from .shared_data_manager import SharedUbusDataManager
@@ -398,6 +401,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register topology panel (only once, re-registers on reload)
     await async_register_topology_panel(hass, entry)
 
+    # Optional event-driven presence push (reuses the ubus session, no extra auth)
+    if get_config_value(entry, CONF_PRESENCE_PUSH_ENABLED, DEFAULT_PRESENCE_PUSH_ENABLED):
+        from .presence_push import PresencePushManager
+
+        presence_push = PresencePushManager(
+            hass, entry, hass.data[DOMAIN][f"data_manager_{entry.entry_id}"]
+        )
+        await presence_push.start()
+        hass.data[DOMAIN][f"presence_push_{entry.entry_id}"] = presence_push
+
     return True
 
 
@@ -555,6 +568,15 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     if unload_ok:
+        # Stop presence push first: it needs the ubus session to kill the watcher
+        presence_key = f"presence_push_{entry.entry_id}"
+        if DOMAIN in hass.data and presence_key in hass.data[DOMAIN]:
+            try:
+                await hass.data[DOMAIN][presence_key].stop()
+            except Exception as exc:
+                _LOGGER.debug("Error stopping presence push: %s", exc)
+            hass.data[DOMAIN].pop(presence_key, None)
+
         # Clean up shared data manager
         data_manager_key = f"data_manager_{entry.entry_id}"
         if DOMAIN in hass.data and data_manager_key in hass.data[DOMAIN]:

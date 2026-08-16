@@ -5,7 +5,7 @@
     "@fujr"
   ],
   "config_flow": true,
-  "dependencies": ["http"],
+  "dependencies": ["http", "webhook"],
   "documentation": "https://github.com/fujr/homeassistant-openwrt-ubus",
   "integration_type": "hub",
   "iot_class": "local_polling",
