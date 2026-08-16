@@ -56,8 +56,8 @@ from .const import (
     WIRELESS_SOFTWARES,
     build_ubus_url,
     get_config_value,
-    CONF_PRESENCE_PUSH_ENABLED,
-    DEFAULT_PRESENCE_PUSH_ENABLED,
+    CONF_PRESENCE_FAST_POLL_ENABLED,
+    DEFAULT_PRESENCE_FAST_POLL_ENABLED,
 )
 from .extended_ubus import ExtendedUbus
 from .shared_data_manager import SharedUbusDataManager
@@ -401,15 +401,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register topology panel (only once, re-registers on reload)
     await async_register_topology_panel(hass, entry)
 
-    # Optional event-driven presence push (reuses the ubus session, no extra auth)
-    if get_config_value(entry, CONF_PRESENCE_PUSH_ENABLED, DEFAULT_PRESENCE_PUSH_ENABLED):
-        from .presence_push import PresencePushManager
+    # Optional near-real-time presence fast-poll (HA-side only, no router footprint)
+    if get_config_value(entry, CONF_PRESENCE_FAST_POLL_ENABLED, DEFAULT_PRESENCE_FAST_POLL_ENABLED):
+        from .presence_fast import PresenceFastPoller
 
-        presence_push = PresencePushManager(
+        presence_fast = PresenceFastPoller(
             hass, entry, hass.data[DOMAIN][f"data_manager_{entry.entry_id}"]
         )
-        await presence_push.start()
-        hass.data[DOMAIN][f"presence_push_{entry.entry_id}"] = presence_push
+        await presence_fast.start()
+        hass.data[DOMAIN][f"presence_fast_{entry.entry_id}"] = presence_fast
 
     return True
 
@@ -568,13 +568,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     if unload_ok:
-        # Stop presence push first: it needs the ubus session to kill the watcher
-        presence_key = f"presence_push_{entry.entry_id}"
+        # Stop presence fast-poll first: it uses the shared ubus session
+        presence_key = f"presence_fast_{entry.entry_id}"
         if DOMAIN in hass.data and presence_key in hass.data[DOMAIN]:
             try:
                 await hass.data[DOMAIN][presence_key].stop()
             except Exception as exc:
-                _LOGGER.debug("Error stopping presence push: %s", exc)
+                _LOGGER.debug("Error stopping presence fast-poll: %s", exc)
             hass.data[DOMAIN].pop(presence_key, None)
 
         # Clean up shared data manager

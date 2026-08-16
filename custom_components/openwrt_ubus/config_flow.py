@@ -739,13 +739,15 @@ class OpenwrtUbusOptionsFlow(OptionsFlow):
                 ): bool,
                 vol.Optional(
     CONF_ENABLE_TOPOLOGY_PANEL,
-    CONF_PRESENCE_PUSH_ENABLED,
-    DEFAULT_PRESENCE_PUSH_ENABLED,
+    CONF_PRESENCE_FAST_POLL_ENABLED,
+    DEFAULT_PRESENCE_FAST_POLL_ENABLED,
                     default=current_data.get(CONF_ENABLE_TOPOLOGY_PANEL, DEFAULT_ENABLE_TOPOLOGY_PANEL),
                 ): bool,
                 vol.Optional(
-                    CONF_PRESENCE_PUSH_ENABLED,
-                    default=current_data.get(CONF_PRESENCE_PUSH_ENABLED, DEFAULT_PRESENCE_PUSH_ENABLED),
+                    CONF_PRESENCE_FAST_POLL_ENABLED,
+                    default=current_data.get(
+                        CONF_PRESENCE_FAST_POLL_ENABLED, DEFAULT_PRESENCE_FAST_POLL_ENABLED
+                    ),
                 ): bool,
                 vol.Optional(
                     CONF_SYSTEM_SENSOR_TIMEOUT,

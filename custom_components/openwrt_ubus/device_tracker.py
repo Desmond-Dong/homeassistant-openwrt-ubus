@@ -215,7 +215,7 @@ async def async_setup_entry(
     data_manager = hass.data[DOMAIN][data_manager_key]
 
     # Optional presence push manager (event-driven acceleration)
-    presence_push = hass.data[DOMAIN].get(f"presence_push_{entry.entry_id}")
+    presence_fast = hass.data[DOMAIN].get(f"presence_fast_{entry.entry_id}")
 
     # Check if wired tracker is enabled (support both old and new key)
     enable_wired_tracker = entry.options.get(
@@ -314,7 +314,7 @@ async def async_setup_entry(
         if new_devices:
             _LOGGER.info("Found %d new devices for tracking: %s", len(new_devices), new_devices)
             new_entities = await _create_entities_for_devices(
-                hass, entry, coordinator, new_devices, presence_push
+                hass, entry, coordinator, new_devices, presence_fast
             )
             if new_entities:
                 async_add_entities(new_entities, True)
@@ -364,7 +364,7 @@ async def async_setup_entry(
         _LOGGER.debug("Initial devices detected: %s", device_macs)
 
         new_entities = await _create_entities_for_devices(
-            hass, entry, coordinator, device_macs, presence_push
+            hass, entry, coordinator, device_macs, presence_fast
         )
         if new_entities:
             async_add_entities(new_entities, True)
@@ -434,7 +434,7 @@ async def _create_entities_for_devices(
     entry: ConfigEntry,
     coordinator: SharedDataUpdateCoordinator,
     mac_addresses: set[str],
-    presence_push=None,
+    presence_fast=None,
 ) -> list:
     """Create device tracker entities for the given MAC addresses."""
     entity_registry = er.async_get(hass)
@@ -487,7 +487,7 @@ async def _create_entities_for_devices(
                 coordinator,
                 mac_address,
                 getattr(coordinator, "restored_connection_types", {}).get(mac_address),
-                presence_push=presence_push,
+                presence_fast=presence_fast,
             )
             # Ensure the entity is enabled by default
             entity._attr_entity_registry_enabled_default = True
@@ -519,7 +519,7 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
         coordinator: SharedDataUpdateCoordinator,
         mac_address: str,
         restored_connection_type: str | None = None,
-        presence_push=None,
+        presence_fast=None,
     ) -> None:
         """Initialize the device tracker."""
         super().__init__(coordinator)
@@ -538,7 +538,7 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
         # stale ARP entries keep them "home" and hide wireless attributes.
         self._is_wireless: bool | None = restored_connection_type == "wireless" if restored_connection_type else None
         # Optional event-driven presence push (webhook); None disables fast path
-        self._presence_push = presence_push
+        self._presence_fast = presence_fast
         self._presence_remove_listener = None
         consider_home_seconds = coordinator.data_manager.entry.data.get(
             CONF_CONSIDER_HOME, DEFAULT_CONSIDER_HOME
@@ -548,9 +548,9 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
     async def async_added_to_hass(self) -> None:
         """Register for instant presence push updates."""
         await super().async_added_to_hass()
-        if self._presence_push:
-            self._presence_remove_listener = self._presence_push.add_listener(
-                self._attr_mac_address, self._on_presence_push
+        if self._presence_fast:
+            self._presence_remove_listener = self._presence_fast.add_listener(
+                self._attr_mac_address, self._on_presence_fast
             )
 
     async def async_will_remove_from_hass(self) -> None:
@@ -560,7 +560,7 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
             self._presence_remove_listener = None
         await super().async_will_remove_from_hass()
 
-    def _on_presence_push(self) -> None:
+    def _on_presence_fast(self) -> None:
         """Refresh immediately when the router pushes a presence change."""
         if self.hass is not None:
             self.async_write_ha_state()
@@ -758,12 +758,12 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
     @property
     def is_connected(self) -> bool:
         """Return true if the device is connected to the network."""
-        # Fast path: event-driven presence push (fresh = stream is alive).
-        # Returns None when stale/disabled, falling through to polling.
-        if self._presence_push:
-            pushed = self._presence_push.get_connected(self._attr_mac_address)
-            if pushed is not None:
-                return self._check_consider_home(pushed)
+        # Fast path: near-real-time fast-poll state (fresh = loop is alive).
+        # Returns None when stale/disabled, falling through to normal polling.
+        if self._presence_fast:
+            fast = self._presence_fast.get_connected(self._attr_mac_address)
+            if fast is not None:
+                return self._check_consider_home(fast)
 
         # For uniqueid tracking, search across all routers
         if self._tracking_method == "uniqueid":

@@ -102,7 +102,7 @@
           "enable_nlbwmon_sensors": "启用 NLBWMon 高带宽主机传感器",
           "enable_service_controls": "启用服务控制",
           "enable_device_kick_buttons": "启用设备踢出按钮",
-          "presence_push_enabled": "启用事件驱动的在线状态推送（即时更新，复用 ubus 会话）",
+          "presence_fast_poll_enabled": "快速在线检测（秒级轮询客户端列表，路由器无需安装任何东西）",
           "enable_wired_tracker": "启用有线设备跟踪",
           "wired_tracker_name_priority": "有线设备名称优先级",
           "wired_tracker_whitelist": "有线设备白名单",

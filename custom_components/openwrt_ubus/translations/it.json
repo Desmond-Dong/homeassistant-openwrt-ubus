@@ -92,7 +92,7 @@
           "enable_nlbwmon_sensors": "Abilita Sensore NLBWMon Host Principali",
           "enable_service_controls": "Abilita Controlli Servizi",
           "enable_device_kick_buttons": "Abilita Pulsanti Disconnessione Dispositivi",
-          "presence_push_enabled": "Abilita Presenza Event-Driven (aggiornamenti istantanei, riusa sessione ubus)",
+          "presence_fast_poll_enabled": "Rilevamento Presenza Rapido (sonda elenco client ogni pochi secondi)",
           "enable_wired_tracker": "Abilita Tracciamento Dispositivi Cablati",
           "wired_tracker_name_priority": "Priorità Nome Dispositivo Cablato",
           "wired_tracker_whitelist": "Whitelist Dispositivi Cablati",

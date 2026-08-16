@@ -48,17 +48,13 @@ CONF_WIRED_TRACKER_INTERFACES = "wired_tracker_interfaces"
 CONF_ENABLE_TOPOLOGY_PANEL = "enable_topology_panel"
 DEFAULT_ENABLE_TOPOLOGY_PANEL = True
 
-# Presence push (event-driven acceleration, reuses the existing ubus session:
-# the integration deploys a tiny watcher script on the router via file.write/
-# file.exec and receives instant updates through an auto-generated HA webhook.
-# No extra credentials; polling stays as the fallback when disabled.)
-CONF_PRESENCE_PUSH_ENABLED = "presence_push_enabled"
-DEFAULT_PRESENCE_PUSH_ENABLED = False
-PRESENCE_PUSH_INTERVAL_SECONDS = 2      # router-side diff poll cadence
-PRESENCE_PUSH_HEARTBEAT_LOOPS = 15      # heartbeat every interval*loops (~30s)
-PRESENCE_PUSH_STALE_SECONDS = 90        # trust fast path only within this window
-PRESENCE_PUSH_SCRIPT_PATH = "/tmp/openwrt_ubus_presence.sh"
-PRESENCE_PUSH_PID_PATH = "/tmp/openwrt_ubus_presence.pid"
+# Presence fast-poll (near-real-time tracker updates, HA-side only:
+# a background task reuses the existing ubus session to poll hostapd
+# client lists every few seconds. Nothing is installed on the router.)
+CONF_PRESENCE_FAST_POLL_ENABLED = "presence_fast_poll_enabled"
+DEFAULT_PRESENCE_FAST_POLL_ENABLED = False
+PRESENCE_FAST_INTERVAL_SECONDS = 3      # fast-poll cadence
+PRESENCE_FAST_STALE_MULTIPLIER = 4      # trust fast path within interval*multiplier
 
 # Wireless device tracker configuration
 CONF_ENABLE_WIRELESS_TRACKERS = "enable_wireless_trackers"
