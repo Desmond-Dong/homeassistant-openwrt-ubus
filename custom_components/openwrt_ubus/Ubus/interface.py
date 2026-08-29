@@ -172,7 +172,11 @@ class Ubus:
                     verify_ssl=self.verify,
                 )
                 break
-            except aiohttp.ClientConnectionError as e:
+            except asyncio.CancelledError:
+                # Task shutdown is a real cancellation: never swallow it.
+                raise
+            except (aiohttp.ClientConnectionError, asyncio.TimeoutError) as e:
+                # Connection reset / request timeout are transient: retry.
                 _LOGGER.warning("Connection error when calling API: %s", e)
                 retries_left -= 1
                 if retries_left == 0:
@@ -181,8 +185,8 @@ class Ubus:
                     _LOGGER.debug("Retrying API call... (%d retries left)", retries_left)
                     await asyncio.sleep(5-retries_left)  # Brief pause before retrying
             except Exception as e:
-                _LOGGER.error("Unexpected error when calling API: %s", e)
-                raise ConnectionError(f"Unexpected error when calling API: {e}")
+                _LOGGER.error("Unexpected error when calling API: %r", e)
+                raise ConnectionError(f"Unexpected error when calling API: {e!r}")
 
         if response.status != HTTP_STATUS_OK:
             return None
