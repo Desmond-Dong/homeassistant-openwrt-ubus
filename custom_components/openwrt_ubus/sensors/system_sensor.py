@@ -267,7 +267,6 @@ async def async_setup_entry(
 
     async def _handle_coordinator_update_async() -> None:
         """Create newly discovered temperature sensors after startup."""
-        nonlocal known_temperature_sensors
         if not coordinator.data:
             return
 

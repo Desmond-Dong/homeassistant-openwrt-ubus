@@ -13,10 +13,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Callable
+from typing import Callable
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 from .const import (
     PRESENCE_FAST_INTERVAL_SECONDS,
@@ -53,7 +54,7 @@ class PresenceFastPoller:
         """Whether fast-poll state is recent enough to be trusted."""
         return (
             self._last_success is not None
-            and (datetime.now() - self._last_success)
+            and (dt_util.utcnow() - self._last_success)
             < timedelta(seconds=PRESENCE_FAST_INTERVAL_SECONDS * PRESENCE_FAST_STALE_MULTIPLIER)
         )
 
@@ -149,7 +150,7 @@ class PresenceFastPoller:
         previous = dict(self._clients)
         known = set(previous) | current
         self._clients = {m: (m in current) for m in known}
-        self._last_success = datetime.now()
+        self._last_success = dt_util.utcnow()
 
         changed = {m for m in known if previous.get(m) != self._clients.get(m)}
         for mac in changed:

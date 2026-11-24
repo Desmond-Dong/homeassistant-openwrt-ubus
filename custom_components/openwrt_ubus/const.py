@@ -1,6 +1,6 @@
 """Constants for the openwrt_ubus integration."""
 
-from homeassistant.const import Platform, CONF_IP_ADDRESS
+from homeassistant.const import Platform
 
 DOMAIN = "openwrt_ubus"
 PLATFORMS = [Platform.DEVICE_TRACKER, Platform.SENSOR, Platform.SWITCH, Platform.BUTTON]

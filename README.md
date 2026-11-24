@@ -1,7 +1,7 @@
 # OpenWrt Ubus Integration for Home Assistant
 
-[![Validate with hassfest](https://github.com/FUjr/homeassistant-openwrt-ubus/actions/workflows/hassfest.yml/badge.svg?branch=dev)](https://github.com/FUjr/homeassistant-openwrt-ubus/actions/workflows/hassfest.yml)
-[![Validate](https://github.com/FUjr/homeassistant-openwrt-ubus/actions/workflows/validate.yml/badge.svg?branch=dev)](https://github.com/FUjr/homeassistant-openwrt-ubus/actions/workflows/validate.yml)
+[![Validate with hassfest](https://github.com/Desmond-Dong/homeassistant-openwrt-ubus/actions/workflows/hassfest.yml/badge.svg?branch=main)](https://github.com/Desmond-Dong/homeassistant-openwrt-ubus/actions/workflows/hassfest.yml)
+[![Validate](https://github.com/Desmond-Dong/homeassistant-openwrt-ubus/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Desmond-Dong/homeassistant-openwrt-ubus/actions/workflows/validate.yml)
 
 [中文版本](README_zh.md) | **English Version**
 
@@ -106,7 +106,7 @@ service uhttpd start && service uhttpd enable
 
 1. **📂 Download**: Clone or download this repository
    ```bash
-   git clone https://github.com/FUjr/homeassistant-openwrt-ubus.git
+   git clone https://github.com/Desmond-Dong/homeassistant-openwrt-ubus.git
    ```
 
 2. **📋 Copy Files**: Copy the integration to your Home Assistant
@@ -126,7 +126,7 @@ service uhttpd start && service uhttpd enable
 
 1. **➕ Add Repository**: In HACS, go to **Integrations** → **⋮** → **Custom repositories**
    
-2. **📦 Install**: Add `https://github.com/FUjr/homeassistant-openwrt-ubus` as Integration
+2. **📦 Install**: Add `https://github.com/Desmond-Dong/homeassistant-openwrt-ubus` as Integration
 
 3. **⬇️ Download**: Search for "OpenWrt ubus" and install
 
@@ -313,11 +313,9 @@ You have a mesh network with 3 APs covering your home. You want a single presenc
 When switching between tracking methods or setting up for the first time:
 
 1. **Automatic Migration**: The integration includes built-in migration functions that automatically update entity `unique_id` formats
-2. **Clean Setup**: For best results with `uniqueid` method on existing installations:
-   - Stop Home Assistant
-   - Run cleanup script: `python3 cleanup_openwrt_buttons.py`
-   - Restart Home Assistant
-   - Entities will be recreated with correct format
+2. **Clean Setup**: For best results with `uniqueid` method on existing installations, remove the old
+   device tracker / sensor entities from the entity registry (Settings → Devices & Services → Entities)
+   and reload the integration. Missing entities are recreated automatically with the correct format.
 3. **Entity Persistence**: Once created, entity IDs remain stable even when devices roam (with `uniqueid` method)
 
 #### Wireless Device Detection
@@ -826,7 +824,7 @@ This project is licensed under the Mozilla Public License 2.0 (MPL-2.0) - see th
 
 ## 🆘 Support & Community
 
-- **🐛 GitHub Issues**: [Report bugs or request features](https://github.com/fujr/homeassistant-openwrt-ubus/issues)
+- **🐛 GitHub Issues**: [Report bugs or request features](https://github.com/Desmond-Dong/homeassistant-openwrt-ubus/issues)
 - **💬 Home Assistant Community**: [Discuss on the forum](https://community.home-assistant.io/)
 - **📖 OpenWrt Documentation**: [Official OpenWrt Wiki](https://openwrt.org/docs/start)
 - **🔧 ubus Reference**: [OpenWrt ubus Documentation](https://openwrt.org/docs/techref/ubus)

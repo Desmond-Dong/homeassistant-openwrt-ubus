@@ -65,15 +65,9 @@ SENSOR_MODULES = [
     },
     {
         "module": mwan3_sensor,
-        "config_key": "enable_mwan3_sensors",
-        "default": DEFAULT_ENABLE_MWAN3_SENSORS,
-        "name": "mwan3_sensor",
-    },
-    {
-        "module": mwan3_sensor,
         "config_key": CONF_ENABLE_MWAN3_SENSORS,
         "default": DEFAULT_ENABLE_MWAN3_SENSORS,
-        "name": "mwan3_sensor"
+        "name": "mwan3_sensor",
     },
     {
         "module": eth_sensor,
@@ -86,12 +80,6 @@ SENSOR_MODULES = [
         "config_key": CONF_ENABLE_NLBWMON_SENSORS,
         "default": DEFAULT_ENABLE_NLBWMON_SENSORS,
         "name": "nlbwmon_sensor",
-    },
-    {
-        "module": nlbwmon_sensor,
-        "config_key": CONF_ENABLE_NLBWMON_SENSORS,
-        "default": DEFAULT_ENABLE_NLBWMON_SENSORS,
-        "name": "nlbwmon_sensor"
     },
 ]
 

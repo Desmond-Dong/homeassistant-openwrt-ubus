@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 import logging
 
-from homeassistant.components import panel_custom, websocket_api
+from homeassistant.components import frontend, panel_custom, websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
+from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from .const import (
@@ -19,6 +18,7 @@ from .const import (
     DEFAULT_ENABLE_TOPOLOGY_PANEL,
     DOMAIN,
 )
+from .device_registry_utils import async_get_device
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ async def async_register_topology_panel(hass: HomeAssistant, entry: ConfigEntry)
         return
 
     # Remove stale panel if left over from a previous unload
-    hass.data.setdefault("frontend_panels", {}).pop(TOPOLOGY_PANEL_PATH, None)
+    frontend.async_remove_panel(hass, TOPOLOGY_PANEL_PATH, warn_if_unknown=False)
 
     show_in_sidebar = entry.options.get(
         CONF_ENABLE_TOPOLOGY_PANEL,
@@ -76,11 +76,12 @@ async def async_register_topology_panel(hass: HomeAssistant, entry: ConfigEntry)
 
 
 def _device_id_for_identifier(
-    device_registry: dr.DeviceRegistry,
+    hass: HomeAssistant,
+    entry_id: str,
     identifier: tuple[str, str],
 ) -> str | None:
     """Look up a Home Assistant device id by integration identifier."""
-    device = device_registry.async_get_device(identifiers={identifier})
+    device = async_get_device(hass, identifier, entry_id)
     return device.id if device else None
 
 
@@ -153,7 +154,7 @@ def _merge_with_previous_topology(
     if not previous_graph:
         return nodes, edges
 
-    now_ts = datetime.now().timestamp()
+    now_ts = dt_util.utcnow().timestamp()
     existing_node_ids = {node["id"] for node in nodes}
     previous_nodes = {node["id"]: node for node in previous_graph.get("nodes", [])}
     previous_edges = previous_graph.get("edges", [])
@@ -208,10 +209,9 @@ async def _build_entry_topology(hass: HomeAssistant, entry: ConfigEntry) -> dict
     wireless_devices = combined.get("device_statistics", {}) or {}
     wired_devices = combined.get("wired_devices", {}) or {}
 
-    device_registry = dr.async_get(hass)
     host = entry.data[CONF_HOST]
     router_node_id = f"router:{entry.entry_id}"
-    now_ts = datetime.now().timestamp()
+    now_ts = dt_util.utcnow().timestamp()
 
     nodes: list[dict] = [
         {
@@ -220,7 +220,7 @@ async def _build_entry_topology(hass: HomeAssistant, entry: ConfigEntry) -> dict
             "label": entry.title or host,
             "secondary": host,
             "status": "online",
-            "device_id": _device_id_for_identifier(device_registry, (DOMAIN, host)),
+            "device_id": _device_id_for_identifier(hass, entry.entry_id, (DOMAIN, host)),
         }
     ]
     edges: list[dict] = []
@@ -246,7 +246,7 @@ async def _build_entry_topology(hass: HomeAssistant, entry: ConfigEntry) -> dict
                 "secondary": secondary,
                 "status": "online",
                 "topology_last_seen": now_ts,
-                "device_id": _device_id_for_identifier(device_registry, (DOMAIN, f"{host}_ap_{ap_device}")),
+                "device_id": _device_id_for_identifier(hass, entry.entry_id, (DOMAIN, f"{host}_ap_{ap_device}")),
             }
         )
         edges.append(
@@ -291,7 +291,7 @@ async def _build_entry_topology(hass: HomeAssistant, entry: ConfigEntry) -> dict
                 "connected": connected,
                 "signal": signal,
                 "topology_last_seen": now_ts,
-                "device_id": _device_id_for_identifier(device_registry, (DOMAIN, mac)),
+                "device_id": _device_id_for_identifier(hass, entry.entry_id, (DOMAIN, mac)),
             }
         )
         edges.append(
@@ -327,7 +327,7 @@ async def _build_entry_topology(hass: HomeAssistant, entry: ConfigEntry) -> dict
                 "connected": connected,
                 "confidence": confidence,
                 "topology_last_seen": now_ts,
-                "device_id": _device_id_for_identifier(device_registry, (DOMAIN, mac)),
+                "device_id": _device_id_for_identifier(hass, entry.entry_id, (DOMAIN, mac)),
             }
         )
         edges.append(

@@ -20,6 +20,7 @@ from .const import (
     DEFAULT_HTTP_PORT,
     DEFAULT_HTTPS_PORT,
     DEFAULT_ENDPOINT,
+    API_RPC_LIST,
     build_ubus_url,
 )
 
@@ -85,11 +86,12 @@ class ConnectionDiagnostics:
             session = async_get_clientsession(hass)
             client = create_enhanced_ubus_client(
                 url,
+                host,
                 username,
                 password,
                 session=session,
                 verify_ssl=verify_ssl,
-                cert_file=cert_path
+                cert_file=cert_path,
             )
 
             # Test connection
@@ -103,7 +105,7 @@ class ConnectionDiagnostics:
 
                 # Test basic ubus functionality
                 try:
-                    ubus_list = await client.list()
+                    ubus_list = await client.api_call(API_RPC_LIST, "*")
                     results["details"]["ubus_services"] = len(ubus_list) if ubus_list else 0
                     _LOGGER.debug("Found %d ubus services", results["details"]["ubus_services"])
                 except Exception as exc:

@@ -35,6 +35,7 @@ from ..const import (
     DEFAULT_SELECT_ALL_STA,
     DEFAULT_SELECTED_STA,
 )
+from ..device_registry_utils import async_via_device_kwargs
 from ..shared_data_manager import SharedDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -667,10 +668,20 @@ class DeviceStatisticsSensor(CoordinatorEntity, SensorEntity):
             "connections": {("mac", self._mac_address)},
         }
 
-        # For uniqueid tracking, don't set via_device since device can roam between APs
-        # For combined tracking, set via_device to local AP
-        if self._tracking_method == "combined" and ap_device != "Unknown AP":
-            device_info_dict["via_device"] = (DOMAIN, f"{self._host}_ap_{ap_device}")
+        # For uniqueid tracking, don't link a via device since the device can
+        # roam between APs. For combined tracking, link to the local AP.
+        if (
+            self._tracking_method == "combined"
+            and ap_device != "Unknown AP"
+            and self.hass is not None
+        ):
+            device_info_dict.update(
+                async_via_device_kwargs(
+                    self.hass,
+                    (DOMAIN, f"{self._host}_ap_{ap_device}"),
+                    self.coordinator.data_manager.entry.entry_id,
+                )
+            )
 
         return DeviceInfo(**device_info_dict)
 

@@ -12,8 +12,6 @@ from ..security_utils import redact_sensitive_data
 from .const import (
     API_DEF_DEBUG,
     API_DEF_SESSION_ID,
-    API_DEF_TIMEOUT,
-    API_DEF_VERIFY,
     API_ERROR,
     API_MESSAGE,
     API_SESSION_METHOD_LOGIN,
@@ -28,6 +26,7 @@ from .const import (
     API_SESSION_METHOD_LIST,
     HTTP_STATUS_OK,
     UBUS_ERROR_SUCCESS,
+    UBUS_ERROR_PERMISSION_DENIED,
     _get_error_message,
     API_SESSION_METHOD_DESTROY,
 )
@@ -130,7 +129,14 @@ class Ubus:
     async def _batch_call(self, rpcs: list[PreparedCall]) -> list[tuple[str, dict | list | None | Exception]] | None:
         self._ensure_session()
 
-        if rpcs[0] and rpcs[0].subsystem != API_SUBSYS_SESSION:
+        if not rpcs:
+            return []
+
+        # Work on a copy: the session-refresh call is appended below and must
+        # not mutate the caller's list.
+        rpcs = list(rpcs)
+
+        if rpcs[0].subsystem != API_SUBSYS_SESSION:
             rpcs.append(
                 PreparedCall(  # Session list call for getting the session expiration
                     rpc_method=API_RPC_CALL,

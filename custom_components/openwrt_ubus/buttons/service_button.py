@@ -28,13 +28,18 @@ async def async_setup_entry(
 ) -> None:
     """Set up service restart button entities from a config entry."""
 
-    # Check if service controls are enabled
-    if not entry.data.get(CONF_ENABLE_SERVICE_CONTROLS, False):
+    # Check if service controls are enabled (priority: options > data)
+    if not entry.options.get(
+        CONF_ENABLE_SERVICE_CONTROLS,
+        entry.data.get(CONF_ENABLE_SERVICE_CONTROLS, False),
+    ):
         _LOGGER.debug("Service controls disabled, skipping service restart button setup")
         return
 
-    # Get selected services
-    selected_services = entry.data.get(CONF_SELECTED_SERVICES, [])
+    # Get selected services (priority: options > data)
+    selected_services = entry.options.get(
+        CONF_SELECTED_SERVICES, entry.data.get(CONF_SELECTED_SERVICES, [])
+    )
     if not selected_services:
         _LOGGER.debug("No services selected, skipping service restart button setup")
         return

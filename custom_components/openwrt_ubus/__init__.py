@@ -34,13 +34,9 @@ from .const import (
     CONF_ENABLE_ETH_SENSORS,
     CONF_ENABLE_MWAN3_SENSORS,
     CONF_ENABLE_NLBWMON_SENSORS,
-    CONF_ENABLE_SERVICE_CONTROLS,
-    CONF_SELECTED_SERVICES,
     DEFAULT_DHCP_SOFTWARE,
     DEFAULT_WIRELESS_SOFTWARE,
     DEFAULT_USE_HTTPS,
-    DEFAULT_HTTP_PORT,
-    DEFAULT_HTTPS_PORT,
     DEFAULT_ENDPOINT,
     DEFAULT_ENABLE_QMODEM_SENSORS,
     DEFAULT_ENABLE_STA_SENSORS,
@@ -48,8 +44,6 @@ from .const import (
     DEFAULT_ENABLE_AP_SENSORS,
     DEFAULT_ENABLE_ETH_SENSORS,
     DEFAULT_ENABLE_MWAN3_SENSORS,
-    DEFAULT_ENABLE_SERVICE_CONTROLS,
-    DEFAULT_SELECTED_SERVICES,
     DHCP_SOFTWARES,
     DOMAIN,
     PLATFORMS,
@@ -59,32 +53,13 @@ from .const import (
     CONF_PRESENCE_FAST_POLL_ENABLED,
     DEFAULT_PRESENCE_FAST_POLL_ENABLED,
 )
+from .device_registry_utils import async_get_device
 from .extended_ubus import ExtendedUbus
 from .shared_data_manager import SharedUbusDataManager
 from .topology import async_setup_topology, async_register_topology_panel
-from .ubus_client import create_enhanced_extended_ubus_client
-from .security_utils import CredentialManager, safe_log_data
 
 _LOGGER = logging.getLogger(__name__)
 
-
-async def _check_ubus_availability(check_name: str, create_coro) -> bool:
-    """Run a lightweight availability check with a few retries."""
-    for attempt in range(1, 4):
-        try:
-            result = await create_coro()
-            available = result is not None and bool(result)
-            _LOGGER.debug("%s availability check: %s", check_name, available)
-            return available
-        except PermissionError as exc:
-            _LOGGER.debug("%s availability denied: %s", check_name, exc)
-            return False
-        except Exception as exc:
-            _LOGGER.debug("%s check failed (attempt %d/3): %s", check_name, attempt, exc)
-            if attempt < 3:
-                await asyncio.sleep(2)
-
-    return False
 
 CONFIG_SCHEMA = vol.Schema(
     {
@@ -292,7 +267,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 client = await shared_manager._get_ubus_client()  # type: ignore[attr-defined]
 
                 # Call UCI uci_network_interface
-                result = await client.uci_network_interface(section, option)
+                await client.uci_network_interface(section, option)
                 _LOGGER.debug("UBUS call %s %s", section, option)
 
             async def async_handle_uci_set_commit(call):
@@ -417,6 +392,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _cleanup_disabled_sensor_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Clean up devices for disabled sensor types."""
     device_registry = dr.async_get(hass)
+    # Devices belonging to this config entry. Home Assistant 2026.8 makes each
+    # device owned by a single config entry; this also works on older releases.
+    entry_devices = dr.async_entries_for_config_entry(device_registry, entry.entry_id)
     host = entry.data[CONF_HOST]
 
     _LOGGER.debug("Starting device cleanup for host: %s", host)
@@ -470,7 +448,7 @@ async def _cleanup_disabled_sensor_devices(hass: HomeAssistant, entry: ConfigEnt
     # List all current devices for debugging
     all_devices = [
         device
-        for device in device_registry.devices.values()
+        for device in entry_devices
         if any(identifier[0] == DOMAIN for identifier in device.identifiers)
     ]
     _LOGGER.debug(
@@ -480,7 +458,7 @@ async def _cleanup_disabled_sensor_devices(hass: HomeAssistant, entry: ConfigEnt
 
     # If system sensors are disabled, remove the main router device
     if not system_enabled:
-        main_device = device_registry.async_get_device(identifiers={(DOMAIN, host)})
+        main_device = async_get_device(hass, (DOMAIN, host), entry.entry_id)
         if main_device:
             _LOGGER.info("Removing main router device %s (system sensors disabled)", host)
             device_registry.async_remove_device(main_device.id)
@@ -491,7 +469,7 @@ async def _cleanup_disabled_sensor_devices(hass: HomeAssistant, entry: ConfigEnt
         # only remove the QModem device
         if not qmodem_enabled:
             qmodem_identifier = (DOMAIN, f"{host}_qmodem")
-            qmodem_device = device_registry.async_get_device(identifiers={qmodem_identifier})
+            qmodem_device = async_get_device(hass, qmodem_identifier, entry.entry_id)
             if qmodem_device:
                 _LOGGER.info(
                     "Removing QModem device %s (QModem sensors disabled)",
@@ -501,7 +479,7 @@ async def _cleanup_disabled_sensor_devices(hass: HomeAssistant, entry: ConfigEnt
             else:
                 _LOGGER.debug("QModem device not found for removal: %s", f"{host}_qmodem")
                 # Check if device exists with different identifier pattern
-                for device in device_registry.devices.values():
+                for device in entry_devices:
                     for identifier in device.identifiers:
                         if identifier[0] == DOMAIN and "_qmodem" in str(identifier[1]):
                             _LOGGER.debug("Found QModem-like device: %s", identifier)
@@ -509,9 +487,9 @@ async def _cleanup_disabled_sensor_devices(hass: HomeAssistant, entry: ConfigEnt
         # If STA sensors are disabled, remove all STA devices (devices with via_device pointing to main router)
         if not sta_enabled:
             removed_count = 0
-            for device in list(device_registry.devices.values()):
+            for device in entry_devices:
                 if device.via_device_id:
-                    via_device = device_registry.devices.get(device.via_device_id)
+                    via_device = device_registry.async_get(device.via_device_id)
                     if via_device and (DOMAIN, host) in via_device.identifiers:
                         for identifier in device.identifiers:
                             if (
@@ -540,11 +518,11 @@ async def _cleanup_disabled_sensor_devices(hass: HomeAssistant, entry: ConfigEnt
         for name, enabled, device_id in sensors:
             if enabled:
                 continue
-            main_device = device_registry.async_get_device(identifiers={(DOMAIN, device_id)})
+            main_device = async_get_device(hass, (DOMAIN, device_id), entry.entry_id)
             if not main_device:
                 continue
             removed_count = 0
-            for device in list(device_registry.devices.values()):
+            for device in entry_devices:
                 if device.via_device_id == main_device.id:
                     device_registry.async_remove_device(device.id)
                     removed_count += 1
@@ -554,7 +532,7 @@ async def _cleanup_disabled_sensor_devices(hass: HomeAssistant, entry: ConfigEnt
 
     # Remove orphaned devices (devices with no entities)
     entity_reg = er.async_get(hass)
-    for device in list(device_registry.devices.values()):
+    for device in entry_devices:
         if not any(identifier[0] == DOMAIN for identifier in device.identifiers):
             continue
         entities = er.async_entries_for_device(entity_reg, device.id)

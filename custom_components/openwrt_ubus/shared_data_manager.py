@@ -18,6 +18,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from . import API_DEF_TIMEOUT
 from .const import (
@@ -32,9 +33,7 @@ from .const import (
     CONF_AP_SENSOR_TIMEOUT,
     CONF_MWAN3_SENSOR_TIMEOUT,
     CONF_SERVICE_TIMEOUT,
-    DOMAIN,
     DEFAULT_DHCP_SOFTWARE,
-    DEFAULT_WIRELESS_SOFTWARE,
     DEFAULT_USE_HTTPS,
     DEFAULT_ENDPOINT,
     DEFAULT_SYSTEM_SENSOR_TIMEOUT,
@@ -198,7 +197,7 @@ class SharedUbusDataManager:
             return True
 
         interval = self._update_intervals.get(data_type, timedelta(minutes=1))
-        return datetime.now() - self._last_update[data_type] > interval
+        return dt_util.utcnow() - self._last_update[data_type] > interval
 
     async def _fetch_system_info(self) -> Dict[str, Any]:
         """Fetch system information."""
@@ -756,7 +755,6 @@ class SharedUbusDataManager:
             CONF_WIRED_TRACKER_NAME_PRIORITY,
             CONF_WIRED_TRACKER_WHITELIST,
             CONF_WIRED_TRACKER_INTERFACES,
-            DEFAULT_ENABLE_WIRED_TRACKER,
             DEFAULT_ENABLE_WIRED_TRACKING,
             DEFAULT_WIRED_TRACKER_NAME_PRIORITY,
             DEFAULT_WIRED_TRACKER_WHITELIST,
@@ -1109,7 +1107,7 @@ class SharedUbusDataManager:
                 async with self._update_locks["system_info"]:
                     system_info = await system_client.system_info()
                     self._data_cache["system_info"] = system_info  # Store raw data
-                    self._last_update["system_info"] = datetime.now()
+                    self._last_update["system_info"] = dt_util.utcnow()
             # Use safe get to avoid KeyError if cache not yet populated
             combined_data["system_info"] = self._data_cache.get("system_info", {})
 
@@ -1118,7 +1116,7 @@ class SharedUbusDataManager:
                 async with self._update_locks["system_board"]:
                     board_info = await system_client.system_board()
                     self._data_cache["system_board"] = board_info  # Store raw data
-                    self._last_update["system_board"] = datetime.now()
+                    self._last_update["system_board"] = dt_util.utcnow()
             # Use safe get to avoid KeyError if cache not yet populated
             combined_data["system_board"] = self._data_cache.get("system_board", {})
 
@@ -1127,7 +1125,7 @@ class SharedUbusDataManager:
                 async with self._update_locks["system_stat"]:
                     system_stat = await system_client.system_stat()
                     self._data_cache["system_stat"] = system_stat  # Store raw data
-                    self._last_update["system_stat"] = datetime.now()
+                    self._last_update["system_stat"] = dt_util.utcnow()
             # Use safe get to avoid KeyError if cache not yet populated
             combined_data["system_stat"] = self._data_cache.get("system_stat", {})
 
@@ -1198,7 +1196,7 @@ class SharedUbusDataManager:
                     # For methods that already return wrapped data
                     self._data_cache[data_type] = data
 
-                self._last_update[data_type] = datetime.now()
+                self._last_update[data_type] = dt_util.utcnow()
                 # Return data in the expected format for coordinator
                 return data
             except Exception as exc:

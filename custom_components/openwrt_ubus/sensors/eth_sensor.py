@@ -30,6 +30,7 @@ from ..const import (
     CONF_SYSTEM_SENSOR_TIMEOUT,
     DEFAULT_SYSTEM_SENSOR_TIMEOUT,
 )
+from ..device_registry_utils import async_via_device_kwargs
 from ..shared_data_manager import SharedDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -153,7 +154,8 @@ async def async_setup_entry(
         identifiers={(DOMAIN, f"{host}_eth")},
         name=f"{host} Network Interfaces",
         manufacturer="OpenWrt",
-        via_device=(DOMAIN, host),  # Link to main router device
+        # Link to main router device
+        **async_via_device_kwargs(hass, (DOMAIN, host), entry.entry_id),
     )
 
     entities = []
@@ -221,13 +223,24 @@ class NetworkInterfaceSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{self._host}_{device_name}_{description.key}"
         self._attr_has_entity_name = True
 
-        # Set device info - create a device for each network interface
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{self._host}_{device_name}")},
-            name=f"{device_name}",
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info for this network interface."""
+        via_kwargs = (
+            async_via_device_kwargs(
+                self.hass,
+                (DOMAIN, f"{self._host}_eth"),
+                self.coordinator.data_manager.entry.entry_id,
+            )
+            if self.hass is not None
+            else {}
+        )
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._host}_{self.device_name}")},
+            name=f"{self.device_name}",
             manufacturer="OpenWrt",
             model=self._get_device_type(),
-            via_device=(DOMAIN, f"{self._host}_eth"),  # Link to main router device
+            **via_kwargs,
         )
 
     def _get_device_type(self) -> str:

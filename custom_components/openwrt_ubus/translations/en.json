@@ -8,20 +8,15 @@
           "host": "Host",
           "ip_address": "IP Address",
           "use_https": "Use HTTPS",
-          "port": "Port",
+          "port": "Port (optional)",
           "verify_ssl": "Verify SSL Certificate",
-          "endpoint": "Ubus Endpoint",
+          "endpoint": "API Endpoint",
           "username": "Username",
           "password": "Password",
-          "use_https": "Use HTTPS",
-          "verify_ssl": "Verify SSL Certificate",
           "cert_path": "Custom Certificate Path (optional)",
-          "port": "Port (optional)",
-          "endpoint": "API Endpoint",
           "tracking_method": "Tracking Method",
           "wireless_software": "Wireless Software",
-          "dhcp_software": "DHCP Software",
-          "tracking_method": "Tracking Method"
+          "dhcp_software": "DHCP Software"
         }
       },
       "sensors": {
@@ -132,7 +127,10 @@
           "sta_sensor_timeout": "Station Sensor Update Interval (seconds)",
           "ap_sensor_timeout": "Access Point Sensor Update Interval (seconds)",
           "mwan3_sensor_timeout": "mwan3 Status Update Interval (seconds)",
-          "tracking_method": "Tracking Method"
+          "tracking_method": "Tracking Method",
+          "wired_tracker_interfaces": "Wired Device Interface Filter",
+          "enable_topology_panel": "Show Topology Panel in Sidebar",
+          "consider_home": "Consider Home Delay (seconds)"
         },
         "data_description": {
           "use_https": "Whether to use HTTPS (SSL/TLS) when connecting to the router",
@@ -158,7 +156,8 @@
           "ap_sensor_timeout": "How often to update access point data (30-600 seconds)",
           "tracking_method": "Tracking method for devices: 'uniqueid' uses MAC address only (device roams between APs), 'combined' uses AP+MAC (separate entities per AP)",
           "mwan3_sensor_timeout": "How often to update mwan3 status data (30-600 seconds)",
-          "enable_mwan3_sensors": "Monitor mwan3 multi-WAN load balancing status"
+          "enable_mwan3_sensors": "Monitor mwan3 multi-WAN load balancing status",
+          "consider_home": "Time in seconds to keep a device as 'home' after it was last seen (0-1800). Set to 0 to disable. Useful for devices that temporarily disconnect during WiFi roaming"
         }
       },
       "sta_sensors_config": {
@@ -397,12 +396,6 @@
           }
         }
       }
-    }
-  },
-  "services": {
-    "scan_devices": {
-      "name": "Scan devices",
-      "description": "Manually trigger a device scan on the OpenWrt router"
     }
   }
 }

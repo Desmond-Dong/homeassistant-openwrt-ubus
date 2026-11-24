@@ -33,6 +33,7 @@ from ..const import (
     CONF_AP_SENSOR_TIMEOUT,
     DEFAULT_AP_SENSOR_TIMEOUT,
 )
+from ..device_registry_utils import async_via_device_kwargs
 from ..shared_data_manager import SharedDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -381,7 +382,8 @@ async def async_setup_entry(
         identifiers={(DOMAIN, f"{host}_ap")},
         name=f"{host} Access Points",
         manufacturer="OpenWrt",
-        via_device=(DOMAIN, host),  # Link to main router device
+        # Link to main router device
+        **async_via_device_kwargs(hass, (DOMAIN, host), entry.entry_id),
     )
 
     # Add the single "Total Wireless Clients" sensor on the hub device
@@ -454,12 +456,21 @@ class ApSensor(CoordinatorEntity, SensorEntity):
                 device_name = ap_data["device_name"]
 
         # Create a device for each AP interface
+        via_kwargs = (
+            async_via_device_kwargs(
+                self.hass,
+                (DOMAIN, f"{self._host}_ap"),
+                self.coordinator.data_manager.entry.entry_id,
+            )
+            if self.hass is not None
+            else {}
+        )
         return DeviceInfo(
             identifiers={(DOMAIN, f"{self._host}_ap_{self.ap_device}")},
             name=device_name,
             manufacturer="OpenWrt",
             model="Access Point",
-            via_device=(DOMAIN, f"{self._host}_ap"),
+            **via_kwargs,
         )
 
     @property

@@ -1,11 +1,5 @@
 # Services for openwrt_ubus integration
 
-scan_devices:
-  name: Scan devices
-  description: Manually trigger a device scan on the OpenWrt router
-  target:
-    entity:
-      integration: openwrt_ubus
 uci_get:
   name: UCI get
   description: Read a UCI value via ubus on the OpenWrt router and optionally write it to a sensor

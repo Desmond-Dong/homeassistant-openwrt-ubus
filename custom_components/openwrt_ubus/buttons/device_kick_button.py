@@ -15,6 +15,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.exceptions import HomeAssistantError
 
 from ..const import DOMAIN, CONF_TRACKING_METHOD, DEFAULT_TRACKING_METHOD
+from ..device_registry_utils import async_via_device_kwargs
 from ..shared_data_manager import SharedDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -127,11 +128,6 @@ async def async_setup_entry(
     # Migrate button unique_ids if needed
     await _migrate_kick_button_unique_ids(hass, entry, tracking_method)
 
-    # Get entity registry for checking existing entities
-    from homeassistant.helpers import entity_registry as er
-
-    entity_registry = er.async_get(hass)
-
     # Get shared data manager
     data_manager_key = f"data_manager_{entry.entry_id}"
     data_manager = hass.data[DOMAIN][data_manager_key]
@@ -217,16 +213,6 @@ async def async_setup_entry(
                 button_id = f"{host}_{mac.replace(':', '_')}"
             current_devices.add(button_id)
 
-            # Create button if it doesn't exist (regardless of current availability)
-            if button_id not in created_buttons:
-                # Create hostapd interface name
-                # Don't add "hostapd." prefix if already present (when using hostapd wireless_software)
-                if ap_device.startswith("hostapd."):
-                    hostapd_interface = ap_device
-                else:
-                    hostapd_interface = f"hostapd.{ap_device}"
-
-                # Create new kick button
             # Get SSID for user-friendly naming
             ap_ssid = device_info.get("ap_ssid", ap_device)
 
@@ -378,13 +364,10 @@ class DeviceKickButton(CoordinatorEntity[SharedDataUpdateCoordinator], ButtonEnt
         - If has_entity_name=False: Returns full name including device name
         """
         if self._tracking_method == "uniqueid":
-            # Get AP hostname (without domain)
-            ap_host = self._host.split(".")[0].replace("-", "_").replace(" ", "_").lower()
-
             # Check if has_entity_name is enabled
             if getattr(self, "_attr_has_entity_name", False):
                 # Home Assistant will add device name automatically, so we only provide the suffix
-                return f"kick"
+                return "kick"
             else:
                 # We need to include the device name ourselves
                 device_info = self._get_device_info()
@@ -428,10 +411,20 @@ class DeviceKickButton(CoordinatorEntity[SharedDataUpdateCoordinator], ButtonEnt
             "connections": {("mac", self._device_mac)},
         }
 
-        # For uniqueid tracking, don't set via_device since device can roam between APs
-        # For combined tracking, set via_device to local AP
-        if self._tracking_method == "combined" and ap_device != "unknown":
-            device_info_dict["via_device"] = (DOMAIN, f"{self._host}_ap_{ap_device}")
+        # For uniqueid tracking, don't link a via device since the device can
+        # roam between APs. For combined tracking, link to the local AP.
+        if (
+            self._tracking_method == "combined"
+            and ap_device != "unknown"
+            and self.hass is not None
+        ):
+            device_info_dict.update(
+                async_via_device_kwargs(
+                    self.hass,
+                    (DOMAIN, f"{self._host}_ap_{ap_device}"),
+                    self.coordinator.data_manager.entry.entry_id,
+                )
+            )
 
         return DeviceInfo(**device_info_dict)
 

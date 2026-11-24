@@ -1,7 +1,7 @@
 # OpenWrt Ubus Home Assistant 集成
 
-[![Validate with hassfest](https://github.com/FUjr/homeassistant-openwrt-ubus/actions/workflows/hassfest.yml/badge.svg?branch=dev)](https://github.com/FUjr/homeassistant-openwrt-ubus/actions/workflows/hassfest.yml)
-[![Validate](https://github.com/FUjr/homeassistant-openwrt-ubus/actions/workflows/validate.yml/badge.svg?branch=dev)](https://github.com/FUjr/homeassistant-openwrt-ubus/actions/workflows/validate.yml)
+[![Validate with hassfest](https://github.com/Desmond-Dong/homeassistant-openwrt-ubus/actions/workflows/hassfest.yml/badge.svg?branch=main)](https://github.com/Desmond-Dong/homeassistant-openwrt-ubus/actions/workflows/hassfest.yml)
+[![Validate](https://github.com/Desmond-Dong/homeassistant-openwrt-ubus/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Desmond-Dong/homeassistant-openwrt-ubus/actions/workflows/validate.yml)
 
 **中文版本** | [English Version](README.md)
 
@@ -96,7 +96,7 @@ service uhttpd start && service uhttpd enable
 
 1. **📂 下载**：克隆或下载此仓库
    ```bash
-   git clone https://github.com/FUjr/homeassistant-openwrt-ubus.git
+   git clone https://github.com/Desmond-Dong/homeassistant-openwrt-ubus.git
    ```
 
 2. **📋 复制文件**：将集成复制到您的 Home Assistant
@@ -116,7 +116,7 @@ service uhttpd start && service uhttpd enable
 
 1. **➕ 添加仓库**：在 HACS 中，转到 **集成** → **⋮** → **自定义仓库**
    
-2. **📦 安装**：添加 `https://github.com/FUjr/homeassistant-openwrt-ubus` 作为集成
+2. **📦 安装**：添加 `https://github.com/Desmond-Dong/homeassistant-openwrt-ubus` 作为集成
 
 3. **⬇️ 下载**：搜索 "OpenWrt ubus" 并安装
 
@@ -797,7 +797,7 @@ custom_components/openwrt_ubus/
 
 ## 🆘 支持与社区
 
-- **🐛 GitHub Issues**：[报告错误或请求功能](https://github.com/fujr/homeassistant-openwrt-ubus/issues)
+- **🐛 GitHub Issues**：[报告错误或请求功能](https://github.com/Desmond-Dong/homeassistant-openwrt-ubus/issues)
 - **💬 Home Assistant 社区**：[在论坛讨论](https://community.home-assistant.io/)
 - **📖 OpenWrt 文档**：[官方 OpenWrt Wiki](https://openwrt.org/docs/start)
 - **🔧 ubus 参考**：[OpenWrt ubus 文档](https://openwrt.org/docs/techref/ubus)

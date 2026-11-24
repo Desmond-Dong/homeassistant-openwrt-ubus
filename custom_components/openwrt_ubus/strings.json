@@ -8,20 +8,15 @@
           "host": "Host",
           "ip_address": "IP Address",
           "use_https": "Use HTTPS",
-          "port": "Port",
+          "port": "Port (optional)",
           "verify_ssl": "Verify SSL Certificate",
-          "endpoint": "Ubus Endpoint",
+          "endpoint": "API Endpoint",
           "username": "Username",
           "password": "Password",
-          "use_https": "Use HTTPS",
-          "verify_ssl": "Verify SSL Certificate",
           "cert_path": "Custom Certificate Path (optional)",
-          "port": "Port (optional)",
-          "endpoint": "API Endpoint",
           "tracking_method": "Tracking Method",
           "wireless_software": "Wireless Software",
-          "dhcp_software": "DHCP Software",
-          "tracking_method": "Tracking Method"
+          "dhcp_software": "DHCP Software"
         }
       },
       "sensors": {
@@ -131,6 +126,7 @@
           "enable_device_kick_buttons": "Enable Device Kick Buttons",
           "enable_reboot_button": "Enable Reboot Button",
           "presence_fast_poll_enabled": "Fast Presence Detection (poll client list every few seconds)",
+          "enable_topology_panel": "Show Topology Panel in Sidebar",
           "enable_wireless_trackers": "Enable Wireless Device Tracking",
           "wireless_tracker_whitelist": "Wireless Device Whitelist",
           "enable_wired_tracker": "Enable Wired Device Tracking",
@@ -143,7 +139,6 @@
           "qmodem_sensor_timeout": "QModem Sensor Update Interval (seconds)",
           "sta_sensor_timeout": "Station Sensor Update Interval (seconds)",
           "ap_sensor_timeout": "Access Point Sensor Update Interval (seconds)",
-          "tracking_method": "Tracking Method",
           "consider_home": "Consider Home Delay (seconds)"
         },
         "data_description": {
@@ -402,24 +397,6 @@
           }
         }
       }
-    }
-  },
-  "services": {
-    "scan_devices": {
-      "name": "Scan devices",
-      "description": "Manually trigger a device scan on the OpenWrt router"
-    },
-    "uci_get": {
-      "name": "UCI Get",
-      "description": "Read a UCI configuration option from the OpenWrt router"
-    },
-    "uci_set_commit": {
-      "name": "UCI Set & Commit",
-      "description": "Set a UCI option value and immediately commit the change"
-    },
-    "uci_network_interface": {
-      "name": "UCI Network Interface",
-      "description": "Call a network.interface ubus method"
     }
   }
 }

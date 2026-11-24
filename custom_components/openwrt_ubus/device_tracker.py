@@ -8,50 +8,35 @@ import re
 from datetime import datetime, timedelta
 from typing import Any
 
-import voluptuous as vol
 from homeassistant.components.device_tracker import (
-    PLATFORM_SCHEMA as DEVICE_TRACKER_PLATFORM_SCHEMA,
     ScannerEntity,
     SourceType,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import (
-    CONF_HOST,
-    CONF_PASSWORD,
-    CONF_USERNAME,
-    CONF_VERIFY_SSL,
-    CONF_IP_ADDRESS,
-)
+from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
 )
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_CONSIDER_HOME,
-    CONF_DHCP_SOFTWARE,
-    CONF_WIRELESS_SOFTWARE,
     CONF_TRACKING_METHOD,
     CONF_ENABLE_WIRED_TRACKER,
     CONF_ENABLE_WIRED_TRACKING,
     DEFAULT_CONSIDER_HOME,
-    DEFAULT_DHCP_SOFTWARE,
-    DEFAULT_WIRELESS_SOFTWARE,
     DEFAULT_TRACKING_METHOD,
-    DEFAULT_ENABLE_WIRED_TRACKER,
     DEFAULT_ENABLE_WIRED_TRACKING,
     CONF_ENABLE_WIRELESS_TRACKERS,
     CONF_WIRELESS_TRACKER_WHITELIST,
     DEFAULT_ENABLE_WIRELESS_TRACKERS,
-    DHCP_SOFTWARES,
     DOMAIN,
-    get_config_value,
-    TRACKING_METHODS,
-    WIRELESS_SOFTWARES,
 )
+from .device_registry_utils import async_via_device_kwargs
 from .shared_data_manager import SharedDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -171,19 +156,6 @@ async def _migrate_device_tracker_unique_ids(
     _LOGGER.info("Migration completed: %d entities migrated", migrated_count)
 
 
-PLATFORM_SCHEMA = DEVICE_TRACKER_PLATFORM_SCHEMA.extend(
-    {
-        vol.Required(CONF_HOST): cv.string,
-        vol.Optional(CONF_IP_ADDRESS): cv.string,
-        vol.Optional(CONF_VERIFY_SSL, default=False): cv.boolean,
-        vol.Required(CONF_PASSWORD): cv.string,
-        vol.Required(CONF_USERNAME): cv.string,
-        vol.Optional(CONF_WIRELESS_SOFTWARE, default=DEFAULT_WIRELESS_SOFTWARE): vol.In(WIRELESS_SOFTWARES),
-        vol.Optional(CONF_DHCP_SOFTWARE, default=DEFAULT_DHCP_SOFTWARE): vol.In(DHCP_SOFTWARES),
-    }
-)
-
-
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -270,9 +242,8 @@ async def async_setup_entry(
             entry.data[CONF_HOST],
         )
 
-    # Initialize known_devices from existing entity registry entries
-    await _restore_known_devices_from_registry(hass, entry, coordinator, tracking_method)
-    _LOGGER.debug("Restored %d known devices from registry", len(coordinator.known_devices))
+    # Existing registry entities are intentionally not added to known_devices:
+    # the initial scan below recreates an active entity object for each one.
 
     # Add update listener for dynamic device creation
     async def _handle_coordinator_update_async():
@@ -379,54 +350,6 @@ async def async_setup_entry(
 
     # Register the update listener
     coordinator.async_add_listener(_handle_coordinator_update)
-
-
-async def _restore_known_devices_from_registry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    coordinator: SharedDataUpdateCoordinator,
-    tracking_method: str,
-) -> None:
-    """Restore known devices from existing entity registry entries."""
-    entity_registry = er.async_get(hass)
-    host = entry.data[CONF_HOST]
-    existing_entities = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
-
-    for entity_entry in existing_entities:
-        # Skip deleted entities (entity_id is None for deleted entities)
-        # They should be recreated if device reconnects
-        if entity_entry.entity_id is None:
-            _LOGGER.debug("Skipping deleted entity with unique_id: %s", entity_entry.unique_id)
-            continue
-
-        if entity_entry.domain == "device_tracker" and entity_entry.platform == DOMAIN:
-            # Extract MAC address from unique_id based on tracking method
-            if entity_entry.unique_id:
-                # Handle legacy entities whose unique_id is a bare MAC address
-                if re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", entity_entry.unique_id):
-                    mac_address = entity_entry.unique_id.upper()
-                elif tracking_method == "uniqueid":
-                    # Format: "{mac_address}"
-                    mac_address = entity_entry.unique_id.upper()
-                else:  # "combined"
-                    # Format: "{host}_{mac_address}"
-                    # Use rsplit to handle hostnames with underscores correctly
-                    if "_" in entity_entry.unique_id:
-                        mac_address = entity_entry.unique_id.rsplit("_", 1)[-1].upper()
-                    else:
-                        _LOGGER.debug(
-                            "Cannot parse MAC from unique_id: %s (expected format: {host}_{mac})",
-                            entity_entry.unique_id,
-                        )
-                        continue
-
-                # Don't add to known_devices during restore - let the entity creation flow handle it
-                # This ensures entity objects are created for registry entities
-                # coordinator.known_devices.add(mac_address)
-                _LOGGER.debug(
-                    "Found device in registry: %s (will create entity object during scan)",
-                    mac_address,
-                )
 
 
 async def _create_entities_for_devices(
@@ -649,10 +572,20 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
             "connections": {("mac", self.mac_address)},
         }
 
-        # For uniqueid tracking, don't set via_device since device can roam between routers
-        # For combined tracking, set via_device to local AP
-        if self._tracking_method == "combined" and self.ap_device != "Unknown AP":
-            device_info_dict["via_device"] = (DOMAIN, self.via_device)
+        # For uniqueid tracking, don't link a via device since the device can
+        # roam between routers. For combined tracking, link to the local AP.
+        if (
+            self._tracking_method == "combined"
+            and self.ap_device != "Unknown AP"
+            and self.hass is not None
+        ):
+            device_info_dict.update(
+                async_via_device_kwargs(
+                    self.hass,
+                    (DOMAIN, self.via_device),
+                    self.coordinator.data_manager.entry.entry_id,
+                )
+            )
 
         return DeviceInfo(**device_info_dict)
 
@@ -746,7 +679,7 @@ class OpenwrtDeviceTracker(CoordinatorEntity, ScannerEntity):
 
     def _check_consider_home(self, connected: bool) -> bool:
         """Apply consider_home logic: keep device home for a grace period."""
-        now = datetime.now()
+        now = dt_util.utcnow()
         if connected:
             self._last_seen = now
             return True

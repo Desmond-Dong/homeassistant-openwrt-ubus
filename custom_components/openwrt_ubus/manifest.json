@@ -2,15 +2,15 @@
   "domain": "openwrt_ubus",
   "name": "OpenWrt ubus",
   "codeowners": [
-    "@fujr"
+    "@Desmond-Dong"
   ],
   "config_flow": true,
-  "dependencies": ["http"],
-  "documentation": "https://github.com/fujr/homeassistant-openwrt-ubus",
+  "dependencies": ["http", "frontend", "panel_custom", "websocket_api"],
+  "documentation": "https://github.com/Desmond-Dong/homeassistant-openwrt-ubus",
   "integration_type": "hub",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/fujr/homeassistant-openwrt-ubus/issues",
+  "issue_tracker": "https://github.com/Desmond-Dong/homeassistant-openwrt-ubus/issues",
   "loggers": ["openwrt_ubus"],
   "requirements": ["aiohttp>=3.0.0"],
-  "version": "0.0.10"
+  "version": "0.0.11"
 }

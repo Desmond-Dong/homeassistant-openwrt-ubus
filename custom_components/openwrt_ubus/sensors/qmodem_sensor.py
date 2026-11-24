@@ -37,6 +37,7 @@ from ..const import (
     DEFAULT_QMODEM_SENSOR_TIMEOUT,
     build_configuration_url,
 )
+from ..device_registry_utils import async_via_device_kwargs
 from ..shared_data_manager import SharedDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -279,6 +280,15 @@ class QModemSensor(CoordinatorEntity, SensorEntity):
                 pass  # Use default values if extraction fails
 
         # Create a separate device for QModem
+        via_kwargs = (
+            async_via_device_kwargs(
+                self.hass,
+                (DOMAIN, self._host),
+                self.coordinator.data_manager.entry.entry_id,
+            )
+            if self.hass is not None
+            else {}
+        )
         return DeviceInfo(
             identifiers={(DOMAIN, f"{self._host}_qmodem")},
             name=f"QModem ({self._host})",
@@ -289,7 +299,7 @@ class QModemSensor(CoordinatorEntity, SensorEntity):
                 self.coordinator.data_manager.entry.data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS),
                 self.coordinator.data_manager.entry.data.get(CONF_PORT),
             ),
-            via_device=(DOMAIN, self._host),
+            **via_kwargs,
         )
 
     @property

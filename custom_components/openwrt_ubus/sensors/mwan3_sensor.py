@@ -33,6 +33,7 @@ from ..const import (
     DEFAULT_MWAN3_SENSOR_TIMEOUT,
     build_configuration_url,
 )
+from ..device_registry_utils import async_via_device_kwargs
 from ..shared_data_manager import SharedDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -318,7 +319,8 @@ async def async_setup_entry(
         identifiers={(DOMAIN, f"{host}_mwan3")},
         name=f"{host} MWAN3 Interfaces and Policies",
         manufacturer="OpenWrt",
-        via_device=(DOMAIN, host),  # Link to main router device
+        # Link to main router device
+        **async_via_device_kwargs(hass, (DOMAIN, host), entry.entry_id),
     )
 
     # Create initial entities for existing interfaces and policies
@@ -397,6 +399,15 @@ class MWAN3InterfaceSensor(CoordinatorEntity, SensorEntity):
     def device_info(self) -> DeviceInfo:
         """Return device info for the MWAN3 interface device."""
         # Create a separate device for each MWAN3 interface
+        via_kwargs = (
+            async_via_device_kwargs(
+                self.hass,
+                (DOMAIN, f"{self._host}_mwan3"),
+                self.coordinator.data_manager.entry.entry_id,
+            )
+            if self.hass is not None
+            else {}
+        )
         return DeviceInfo(
             identifiers={(DOMAIN, f"{self._host}_mwan3_intf_{self._interface}")},
             name=f"MWAN3 Interface {self._interface} ({self._host})",
@@ -407,7 +418,7 @@ class MWAN3InterfaceSensor(CoordinatorEntity, SensorEntity):
                 self.coordinator.data_manager.entry.data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS),
                 self.coordinator.data_manager.entry.data.get(CONF_PORT),
             ),
-            via_device=(DOMAIN, f"{self._host}_mwan3"),
+            **via_kwargs,
         )
 
     @property
@@ -553,6 +564,15 @@ class MWAN3PolicySensor(CoordinatorEntity, SensorEntity):
     def device_info(self) -> DeviceInfo:
         """Return device info for the MWAN3 policy device."""
         # Create a separate device for each MWAN3 policy
+        via_kwargs = (
+            async_via_device_kwargs(
+                self.hass,
+                (DOMAIN, f"{self._host}_mwan3"),
+                self.coordinator.data_manager.entry.entry_id,
+            )
+            if self.hass is not None
+            else {}
+        )
         return DeviceInfo(
             identifiers={(DOMAIN, f"{self._host}_mwan3_policy_{self._policy}")},
             name=f"MWAN3 Policy {self._policy} ({self._host})",
@@ -563,7 +583,7 @@ class MWAN3PolicySensor(CoordinatorEntity, SensorEntity):
                 self.coordinator.data_manager.entry.data.get(CONF_USE_HTTPS, DEFAULT_USE_HTTPS),
                 self.coordinator.data_manager.entry.data.get(CONF_PORT),
             ),
-            via_device=(DOMAIN, f"{self._host}_mwan3"),
+            **via_kwargs,
         )
 
     @property
